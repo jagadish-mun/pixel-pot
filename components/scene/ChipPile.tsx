@@ -10,7 +10,7 @@ export default function ChipPile({ amount, scale = 3, maxTowers = 6 }: { amount:
   const towers = chipTowers(amount, { maxChips: 60 }).towers.slice(0, maxTowers);
   const rx = 6;
   const ry = 3;
-  const th = 2;
+  const th = 3;
   const w = Math.max(1, towers.length * (2 * rx + 4) + 2);
   const h = Math.max(...towers.map((t) => t.count), 1) * th + 2 * ry + 5;
   const key = towers.map((t) => `${t.value}x${t.count}`).join(',');

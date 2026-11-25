@@ -233,6 +233,19 @@ function scenes(): Scene[] {
   applyAction(stacksThem, 'Mia', { type: 'start_hand' }, Date.now(), deck(4));
   out.push(cardScene('Cards · stacks of 15 (me), 250,000 and 2,725', stacksThem, 'Mia'));
 
+  // Very unequal stacks: the richest player's pile should look clearly bigger.
+  const unequal = table(4, { mode: 'cards', smallBlind: 0, bigBlind: 0 });
+  for (const [id, chips] of [
+    ['Mia', 2725],
+    ['Sam', 25_000],
+    ['Jo', 990],
+    ['Priya', 15],
+  ] as const) {
+    applyAction(unequal, 'Mia', { type: 'chips', playerId: id, amount: chips - 1000 }, Date.now());
+  }
+  applyAction(unequal, 'Mia', { type: 'start_hand' }, Date.now(), deck(31));
+  out.push(cardScene('Cards · unequal stacks: 25,000, 2,725 (me), 990, 15', unequal, 'Mia'));
+
   // Someone out of chips: Jo has nothing left, so sits out the hand, greyed.
   const broke = table(5, { mode: 'cards' });
   applyAction(broke, 'Mia', { type: 'chips', playerId: 'Jo', amount: -1000 }, Date.now());

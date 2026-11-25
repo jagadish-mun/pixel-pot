@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { DEAL_MS, FLIP_MS, FOLD_MS, SWEEP_MS, drawScene, handsBox, personAt, seatAnchors, type Motion, type SceneData } from './scene/draw';
+import { DEAL_MS, FLIP_MS, FOLD_MS, SWEEP_MS, drawScene, handsBox, personAt, seatAnchors, type Marker, type Motion, type SceneData } from './scene/draw';
 import { handsSize, myCardWidth } from './scene/hands';
 import { BET_INSET, BOARD_Z, POT_SPOT, arrangeSeats, onFelt, spots } from './scene/layout';
 import { idle, poseOf } from './scene/people';
 import { fitCamera, project, type Camera } from './scene/project';
-import { chipTowers } from '@/lib/chips';
+import { WEALTH, chipTowers, wealthTarget } from '@/lib/chips';
 import { chips, signed } from '@/lib/client';
 import { cardText, type Card } from '@/lib/cards';
 import { potOf, potsOf, usesTurns } from '@/lib/game';
@@ -150,12 +150,30 @@ export default function TableView({
   // My hands, first person, need room at the bottom; on tall screens there's a strip below the rail too.
   const cw = size ? myCardWidth(size.w, size.q) : 0;
   const handsH = me ? handsSize(cw, holeCount).h : 0;
+  // A panel floating over the scene's top-left corner (the recent moves on wide screens) is kept clear of.
+  const [overlay, setOverlay] = useState(0);
+  useLayoutEffect(() => {
+    const scene = box.current;
+    const panel = scene?.closest('.stage')?.querySelector<HTMLElement>('.hud');
+    if (!scene || !panel) return;
+    const measure = () => {
+      const s = scene.getBoundingClientRect();
+      const p = panel.getBoundingClientRect();
+      const overlaps = p.bottom > s.top + 4 && p.left < s.left + s.width / 2 && getComputedStyle(panel).display !== 'none';
+      setOverlay(overlaps ? Math.round(p.right - s.left + 8) : 0);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(panel);
+    ro.observe(scene);
+    return () => ro.disconnect();
+  }, []);
   const cam: Camera | null = useMemo(() => {
     if (!size) return null;
     const strip = size.h > size.w * 1.05 ? MY_STRIP / size.q : 0;
     const bottom = Math.max(MARGIN.bottom / size.q, strip, handsH * 0.55);
-    return fitCamera(size.w, size.h, { top: MARGIN.top / size.q, side: MARGIN.side / size.q, bottom });
-  }, [size, handsH]);
+    return fitCamera(size.w, size.h, { top: MARGIN.top / size.q, side: MARGIN.side / size.q, bottom, left: overlay / size.q });
+  }, [size, handsH, overlay]);
 
   // I sit at the near side. Spectators see the table from the host's chair.
   let meIndex = party.players.findIndex((p) => p.id === meId);
@@ -217,11 +235,29 @@ export default function TableView({
   // My chips sit on the felt just above my hands, between them and the middle.
   const myZ = useMemo(() => {
     if (!cam || !hands || !size) return -0.42;
-    // Room for "You have: …" (about 18 CSS px) between the chips and my hands.
-    const top = cam.h - handsH - 3 - 18 / size.q;
-    for (let z = -0.5; z < -0.22; z += 0.01) if (project(cam, 0, 0, z).y <= top) return z;
-    return -0.22;
+    // Room for the "You have: …" pill (about 30 CSS px) between the chips and my hands.
+    const top = cam.h - handsH - 3 - 30 / size.q;
+    for (let z = -0.5; z < -0.1; z += 0.01) if (project(cam, 0, 0, z).y <= top) return z;
+    return -0.1;
   }, [cam, hands, handsH, size]);
+
+  // Piles show relative wealth: the richest stack at the table gets the most chips. Recomputed only when stacks change.
+  const richest = Math.max(1, ...party.players.map((p) => p.stack));
+  // A small table on screen (a phone) gets proportionally fewer chips, so piles don't bury the felt: full counts
+  // when the felt is about 350 CSS px a table unit (a desktop), down to a third on a phone.
+  const chipScale = cam && size ? Math.max(0.33, Math.min(1, (project(cam, 0, 0, 0).s * size.q) / 350)) : 1;
+  const maxChips = (max: number) => Math.round(WEALTH.min + (max - WEALTH.min) * chipScale);
+  const markersOf = (p: Player): Marker[] =>
+    playing ? ([party.dealerId === p.id && 'D', party.sbId === p.id && 'SB', party.bbId === p.id && 'BB'].filter(Boolean) as Marker[]) : party.dealerId === p.id ? ['D'] : [];
+
+  // My towers stay below the board: as many chips a tower (up to 15) as fit between my chips' spot and the board's near edge.
+  const myPerTower = useMemo(() => {
+    if (!cam) return 15;
+    const base = project(cam, 0, 0, myZ);
+    const boardNear = project(cam, 0, 0, BOARD_Z - 0.115).y;
+    const th = Math.max(2, Math.round(0.026 * base.s) >= 8 ? 3 : 2);
+    return Math.max(3, Math.min(15, Math.floor((base.y - boardNear - 6) / th) - 1));
+  }, [cam, myZ]);
 
   const data: SceneData = {
     seats: seats.map(({ player: p, seat, me: mine }) => {
@@ -238,15 +274,20 @@ export default function TableView({
         shown,
         stack: p.stack,
         bet: inFront(party, p),
+        stackChips: wealthTarget(p.stack, richest, maxChips(mine ? WEALTH.me : WEALTH.opponent)),
+        betChips: wealthTarget(inFront(party, p), richest, maxChips(WEALTH.bet)),
+        markers: markersOf(p),
         acting: p.id === actingId,
       };
     }),
     board,
     winning,
     pot: Math.max(0, middle),
+    potChips: wealthTarget(Math.max(0, middle), richest, maxChips(WEALTH.bet)),
     dealerSeat: seats.find((s) => s.player.id === party.dealerId)?.seat ?? null,
     hands,
     myZ,
+    myPerTower,
   };
 
   /* ---------- motion: cards dealt in, bets slid into the pot, folds tossed, shown cards turned over ---------- */
@@ -275,7 +316,10 @@ export default function TableView({
     for (let i = before.board; i < boardCount; i++) m.dealt.set(i, now + (i - before.board) * 160);
     for (const { player: p, seat, me: mine } of arrangeSeats(party.players, meIndex)) {
       const was = before.bets.get(p.id) ?? 0;
-      if (was > 0 && (bets.get(p.id) ?? 0) === 0) m.sweeps.push({ from: mine ? spots(seat, true, myZ).bet : onFelt(seat, BET_INSET), amount: was, start: now });
+      if (was > 0 && (bets.get(p.id) ?? 0) === 0) {
+        const chipsFor = wealthTarget(was, Math.max(1, ...party.players.map((x) => x.stack)), maxChips(WEALTH.bet));
+        m.sweeps.push({ from: mine ? spots(seat, true, myZ).bet : onFelt(seat, BET_INSET), amount: was, chips: chipsFor, start: now });
+      }
       if (folded.has(p.id) && !before.folded.has(p.id)) {
         if (mine) {
           const hb = latest.current.data.hands;
@@ -345,11 +389,22 @@ export default function TableView({
   const dealer = party.players.find((p) => p.id === party.dealerId);
   const canDeal = Boolean(meId && (meId === party.dealerId || meId === party.hostId));
   const handsAt = cam && hands ? handsBox(cam, hands) : null;
+  // My turn's countdown sits in the pill above my cards (my name plate is gone).
+  const myTimer =
+    me && me.id === actingId && party.turnDeadline && party.settings.actionTimer > 0 ? (
+      <TimerRing deadline={party.turnDeadline} seconds={party.settings.actionTimer} />
+    ) : null;
 
   // Where each seat's labels go, in CSS pixels.
   const anchors = cam
     ? seats.map(({ player: p, seat, me: isMe }) => {
-        const a = seatAnchors(cam, { seat, me: isMe, stack: p.stack, bet: inFront(party, p) }, myZ);
+        const bet = inFront(party, p);
+        const a = seatAnchors(
+          cam,
+          { seat, me: isMe, stack: p.stack, bet, stackChips: wealthTarget(p.stack, richest, maxChips(isMe ? WEALTH.me : WEALTH.opponent)), betChips: wealthTarget(bet, richest, maxChips(WEALTH.bet)) },
+          myZ,
+          myPerTower,
+        );
         const x = Math.min(Math.max(a.head.x * q, PLATE_HALF), cam.w * q - PLATE_HALF);
         return { ...a, plate: { x, y: a.head.y * q, lift: 0 }, stackAt: { x: a.stack.x * q, y: a.stack.bottom * q } };
       })
@@ -396,6 +451,7 @@ export default function TableView({
               const { undrawn } = chipTowers(p.stack);
               return (
                 <li key={p.id} className="seatGroup" aria-label={seatLabel(party, p, acting, shown)}>
+                  {!isMe && (
                   <Plate
                     party={party}
                     p={p}
@@ -406,8 +462,9 @@ export default function TableView({
                     stack={stackOnPlate && p.stack > 0 ? chips(p.stack) : null}
                     compact={crowded}
                   />
+                  )}
                   {p.stack > 0 && !stackOnPlate && (
-                    <span className="chipLabel" data-me={isMe} style={at(isMe ? 2 * a.stack.x - a.stack.right : a.stack.right, a.stack.bottom)} aria-hidden="true">
+                    <span className="chipLabel" data-me={isMe} style={at(isMe ? a.stack.left : a.stack.right, a.stack.bottom)} aria-hidden="true">
                       {chips(p.stack)}
                       {undrawn > 0 && <small>+{chips(undrawn)}</small>}
                     </span>
@@ -423,9 +480,18 @@ export default function TableView({
           </ul>
 
           {/* My hands: "You have" just above them; press and hold the cards (or Space) to lower them. */}
-          {handsAt && myHand && (
+          {handsAt && (myHand || myTimer) && (
             <p className="myHand handsLabel" style={at(handsAt.x + handsAt.w / 2, handsAt.y)} aria-live="polite">
-              You have: <b>{myHand}</b>
+              {myTimer && (
+                <span className="myTimer" aria-hidden="true">
+                  {myTimer}
+                </span>
+              )}
+              {myHand && (
+                <>
+                  You have: <b>{myHand}</b>
+                </>
+              )}
             </p>
           )}
           {handsAt && holding && (
@@ -583,12 +649,6 @@ function Plate({
       </span>
       {stack && <span className="plateStack">{stack}</span>}
       <span className="plateTags">
-        {playing &&
-          roles(party, p).map(([text, kind, title]) => (
-            <span key={text} className={`tag ${kind}`} title={title}>
-              {text}
-            </span>
-          ))}
         {acting && p.bot ? (
           <span className="tag thinking" aria-label="thinking">
             thinking<i>.</i>

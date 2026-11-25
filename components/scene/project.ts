@@ -133,7 +133,7 @@ const FIT = fitPoints();
  * in nearly as far as the best, it takes the steepest, so tall screens see more
  * of the felt and wide, short ones a flatter view.
  */
-export function fitCamera(w: number, h: number, margin: { top: number; side: number; bottom: number }): Camera {
+export function fitCamera(w: number, h: number, margin: { top: number; side: number; bottom: number; left?: number }): Camera {
   const cams: Camera[] = [];
   for (let pitch = 36; pitch <= 55; pitch += 1) {
     const rad = (pitch * Math.PI) / 180;
@@ -150,9 +150,12 @@ export function fitCamera(w: number, h: number, margin: { top: number; side: num
       minY = Math.min(minY, q.y - p.up * q.s);
       maxY = Math.max(maxY, q.y);
     }
-    const f = Math.max(1, Math.min((w - 2 * margin.side) / (maxX - minX), (h - margin.top - margin.bottom) / (maxY - minY)));
-    // Centred across, with the near rail at the bottom.
-    cams.push({ w, h, ...unit, pitch, f, cx: w / 2 - (f * (minX + maxX)) / 2, cy: h - margin.bottom - f * maxY });
+    // An extra left margin (something floating over that corner) shifts the view right.
+    const left = Math.max(margin.side, margin.left ?? 0);
+    const f = Math.max(1, Math.min((w - left - margin.side) / (maxX - minX), (h - margin.top - margin.bottom) / (maxY - minY)));
+    const cx = Math.max(w / 2, left + (f * (maxX - minX)) / 2) - (f * (minX + maxX)) / 2;
+    // Centred across (unless pushed right), with the near rail at the bottom.
+    cams.push({ w, h, ...unit, pitch, f, cx, cy: h - margin.bottom - f * maxY });
   }
   // The steepest view that loses little zoom: tall screens get a fuller view of the felt.
   const top = Math.max(...cams.map((c) => c.f));

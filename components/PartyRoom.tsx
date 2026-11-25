@@ -276,6 +276,9 @@ export default function PartyRoom({ code }: { code: string }) {
 
 type Panel = 'chips' | 'log';
 
+/** The chip beside the newest move, in the move's colour: bets gold, folds red, wins green, everything else grey. */
+const FEED_CHIP: Record<'bet' | 'fold' | 'win' | 'info', string> = { bet: '#f5b83d', fold: '#e2483d', win: '#2fa56d', info: '#8d8996' };
+
 /** A panel that drops down from under the top bar. Takes focus when it opens; Esc closes it. */
 function DropPanel({ id, label, onClose, children }: { id: string; label: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -336,7 +339,7 @@ export function RoomScreen({
   const playing = party.phase !== 'idle';
   const lobby = !playing && party.handNo === 0;
   const myTurn = Boolean(me && legalActions(party, me.id).fold);
-  const feed = party.feed.slice(-3).reverse();
+  const feed = party.feed.slice(-5).reverse();
 
   // Chips and Log drop down from the top bar, one at a time.
   const [panel, setPanel] = useState<Panel | null>(initialPanel);
@@ -355,6 +358,18 @@ export function RoomScreen({
   // The table fits in the space the dock leaves: above it, or beside it on short landscape screens.
   const dockRef = useRef<HTMLDivElement>(null);
   const [dockBox, setDockBox] = useState({ w: 0, h: 0 });
+  // The recent-moves panel's height: the table starts below it.
+  const hudRef = useRef<HTMLDivElement>(null);
+  const [hudH, setHudH] = useState(0);
+  useLayoutEffect(() => {
+    const el = hudRef.current;
+    if (!el) return;
+    const measure = () => setHudH(el.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
   useLayoutEffect(() => {
     const el = dockRef.current;
     if (!el) return;
@@ -434,7 +449,7 @@ export function RoomScreen({
       <main
         className="stage"
         aria-label="Table"
-        style={{ '--dock-w': `${dockBox.w}px`, '--dock-h': `${dockBox.h}px` } as CSSProperties}
+        style={{ '--dock-w': `${dockBox.w}px`, '--dock-h': `${dockBox.h}px`, '--hud-h': `${hudH + 6}px` } as CSSProperties}
       >
         {panel && <div className="panelScrim" onClick={closePanel} aria-hidden="true" />}
         {banner && (
@@ -443,7 +458,7 @@ export function RoomScreen({
           </p>
         )}
 
-        <div className="hud">
+        <div className="hud" ref={hudRef}>
           <div className="feltHead">
             <span>{playing ? `Hand ${party.handNo}` : lobby ? 'Lobby' : `After hand ${party.handNo}`}</span>
             <span className="feltGame">
@@ -455,8 +470,9 @@ export function RoomScreen({
             </span>
           </div>
           <ol className="feed" aria-label="Latest moves">
-            {feed.map((f) => (
+            {feed.map((f, i) => (
               <li key={f.id} data-kind={f.kind}>
+                {i === 0 && <ChipFace color={FEED_CHIP[f.kind]} size={16} />}
                 {f.text}
               </li>
             ))}

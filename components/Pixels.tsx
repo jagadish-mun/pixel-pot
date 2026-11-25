@@ -1,36 +1,26 @@
 /* Pixel-art drawing: chips, faces and icons, all as crisp SVG rects. */
 
-import { denom } from '@/lib/chips';
+import { chipFaceRows, denom } from '@/lib/chips';
 import { facePattern } from '@/lib/faces';
 
 export { faceColor } from '@/lib/faces';
 
 const INK = '#0c0916';
 
-/** A single chip seen from above, used on buttons and as the logo. */
-export function ChipFace({ value = 10, size = 32 }: { value?: number; size?: number }) {
-  const d = { body: denom(value).face, stripe: denom(value).stripe };
-  // 12x12 grid: a chunky octagon with four edge marks.
-  const rows = ['....XXXX....', '..XXXXXXXX..', '.XXXXXXXXXX.', '.XXXXXXXXXX.', 'XXXXXXXXXXXX', 'XXXXXXXXXXXX'];
-  const all = [...rows, ...rows.slice().reverse()];
+/**
+ * A single chip seen from above: the same "dice" chip as on the table (base
+ * colour, six edge inserts, a dashed inner ring), on buttons, in the feed and
+ * as the logo. `color` overrides the base colour (white inserts).
+ */
+export function ChipFace({ value = 10, size = 32, color }: { value?: number; size?: number; color?: string }) {
+  const den = denom(value);
+  const palette: Record<string, string> = color
+    ? { o: INK, b: color, i: '#f4ead5', r: '#f4ead5' }
+    : { o: INK, b: den.face, i: den.stripe, r: den.stripe };
+  const rows = chipFaceRows(14);
   return (
-    <svg width={size} height={size} viewBox="-1 -1 14 14" shapeRendering="crispEdges" aria-hidden="true">
-      {all.map((row, y) => {
-        const first = row.indexOf('X');
-        const len = row.lastIndexOf('X') - first + 1;
-        return <rect key={`o${y}`} x={first - 1} y={y - 1} width={len + 2} height={3} fill={INK} />;
-      })}
-      {all.map((row, y) => {
-        const first = row.indexOf('X');
-        const len = row.lastIndexOf('X') - first + 1;
-        return <rect key={y} x={first} y={y} width={len} height={1} fill={d.body} />;
-      })}
-      <rect x={5} y={0} width={2} height={2} fill={d.stripe} />
-      <rect x={5} y={10} width={2} height={2} fill={d.stripe} />
-      <rect x={0} y={5} width={2} height={2} fill={d.stripe} />
-      <rect x={10} y={5} width={2} height={2} fill={d.stripe} />
-      <rect x={4} y={4} width={4} height={4} fill={d.stripe} />
-      <rect x={5} y={5} width={2} height={2} fill={d.body} />
+    <svg width={size} height={size} viewBox="0 0 14 14" shapeRendering="crispEdges" aria-hidden="true">
+      {rows.flatMap((row, y) => [...row].map((c, x) => (c === '.' ? null : <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill={palette[c]} />)))}
     </svg>
   );
 }
