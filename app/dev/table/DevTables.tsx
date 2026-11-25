@@ -1,6 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import ActionDock from '@/components/ActionDock';
+import { JoinDock, RoomScreen } from '@/components/PartyRoom';
 import TableView from '@/components/TableView';
 import { fullDeck, type Card } from '@/lib/cards';
 import { applyAction, createParty, joinParty } from '@/lib/game';
@@ -188,20 +190,68 @@ function scenes(): Scene[] {
     ['Jo', { type: 'fold' }],
   ]);
   out.push(cardScene('Cards · I won without a showdown (my cards stay private)', foldWin, 'Mia'));
+
+  // My turn with my cards showing, at the smallest and biggest tables.
+  for (const count of [2, 10]) {
+    const rec = table(count, { mode: 'cards', actionTimer: 30 });
+    applyAction(rec, 'Mia', { type: 'start_hand' }, Date.now(), deck(count));
+    while (rec.party.toActId !== 'Mia') applyAction(rec, rec.party.toActId!, { type: 'call' }, Date.now());
+    out.push(cardScene(`Cards · ${count} players · my turn`, rec, 'Mia'));
+  }
   return out;
+}
+
+const noop = async () => false;
+
+/** One scene on the real table screen (top bar, overlays, dock), as a player would see it. */
+function FullScreen({ scene, panel }: { scene: Scene; panel: 'chips' | 'log' | null }) {
+  const { party } = scene;
+  const me = party.players.find((p) => p.id === scene.meId) ?? null;
+  return (
+    <RoomScreen
+      party={party}
+      me={me}
+      myCards={scene.myCards ?? null}
+      sync="ok"
+      busy={false}
+      act={noop}
+      muted={false}
+      onToggleMute={() => {}}
+      openDialog={() => {}}
+      dialogOpen={false}
+      initialPanel={panel}
+      dock={
+        me ? (
+          <ActionDock party={party} me={me} isHost={me.id === party.hostId} busy={false} act={noop} onAward={() => {}} />
+        ) : (
+          <JoinDock party={party} notify={() => {}} onJoined={() => {}} />
+        )
+      }
+    />
+  );
 }
 
 export default function DevTables() {
   // Built after mount: the timer deadlines depend on the clock.
   const [list, setList] = useState<Scene[] | null>(null);
-  useEffect(() => setList(scenes()), []);
+  const [full, setFull] = useState<{ scene: number; panel: 'chips' | 'log' | null } | null>(null);
+  useEffect(() => {
+    setList(scenes());
+    // ?scene=N shows scene N full screen; &panel=chips or &panel=log opens that panel.
+    const q = new URLSearchParams(window.location.search);
+    const panel = q.get('panel');
+    if (q.has('scene')) setFull({ scene: Number(q.get('scene')), panel: panel === 'chips' || panel === 'log' ? panel : null });
+  }, []);
   if (!list) return null;
+  if (full && list[full.scene]) return <FullScreen scene={list[full.scene]} panel={full.panel} />;
   return (
     <main className="devTables">
       <h1 className="setupTitle">Table previews</h1>
-      {list.map((scene) => (
+      {list.map((scene, i) => (
         <section key={scene.title} className="devScene">
-          <h2 className="sectionTitle">{scene.title}</h2>
+          <h2 className="sectionTitle">
+            <a href={`?scene=${i}`}>{scene.title}</a>
+          </h2>
           <TableView
             party={scene.party}
             meId={scene.meId}

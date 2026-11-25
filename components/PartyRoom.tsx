@@ -1,20 +1,21 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FormEvent, type ReactNode } from 'react';
 import ActionDock from './ActionDock';
 import AwardDialog from './AwardDialog';
-import Ledger from './Ledger';
+import { ChipCounts, HandLog } from './Ledger';
 import { ChipFace, Speaker } from './Pixels';
 import { InviteDialog, TableMenu } from './TableMenu';
 import TableView from './TableView';
-import { api, blip, chips, loadMuted, loadName, loadSeat, saveMuted, saveName, saveSeat, useParty, type Seat } from '@/lib/client';
+import { api, blip, chips, loadMuted, loadName, loadSeat, saveMuted, saveName, saveSeat, useParty, type Seat, type Sync } from '@/lib/client';
 import { NAME_MAX, eligibleWinners, legalActions, tableLine, usesTurns } from '@/lib/game';
-import type { Action, Party } from '@/lib/types';
+import type { Card } from '@/lib/cards';
+import type { Action, Party, Player } from '@/lib/types';
 
 type Toast = { id: number; text: string; kind: 'ok' | 'error' };
 
-function JoinDock({
+export function JoinDock({
   party,
   onJoined,
   notify,
@@ -75,7 +76,6 @@ export default function PartyRoom({ code }: { code: string }) {
   const [seat, setSeat] = useState<Seat | null>(null);
   const { party, myCards, sync, needsDatabase, apply, send } = useParty(code, seat);
   const [ready, setReady] = useState(false);
-  const [tab, setTab] = useState<'table' | 'log'>('table');
   const [dialog, setDialog] = useState<null | 'invite' | 'menu' | 'award'>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [busy, setBusy] = useState(false);
@@ -170,11 +170,6 @@ export default function PartyRoom({ code }: { code: string }) {
     document.title = '● Your turn · Pixel Pot';
     navigator.vibrate?.(80);
     if (!mutedRef.current) blip();
-    // Phones: bring my seat, cards and the dock into view (the dock is sticky, so the bottom shows them all).
-    if (window.matchMedia('(max-width: 899px)').matches) {
-      const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
-    }
     return () => {
       document.title = base;
     };
@@ -208,124 +203,29 @@ export default function PartyRoom({ code }: { code: string }) {
 
   const me = party.players.find((p) => p.id === seat?.playerId) ?? null;
   const isHost = Boolean(me && me.id === party.hostId);
-  const host = party.players.find((p) => p.id === party.hostId);
   const playing = party.phase !== 'idle';
-  const lobby = !playing && party.handNo === 0;
-  const feed = party.feed.slice(-3).reverse();
-
-  // The banner says whose turn it is. Free-play tables have no turns, so no banner.
-  let banner: { text: string; mine: boolean } | null = null;
-  if (usesTurns(party) && party.phase === 'live') {
-    const dealer = party.players.find((p) => p.id === party.dealerId);
-    const acting = party.players.find((p) => p.id === party.toActId);
-    if (party.awaitingDeal) {
-      const mine = Boolean(me && (me.id === party.dealerId || isHost));
-      banner = { mine, text: mine ? `Deal the ${party.awaitingDeal}` : `Waiting for ${dealer?.name ?? 'the dealer'} to deal the ${party.awaitingDeal}…` };
-    } else if (myTurn) banner = { mine: true, text: 'Your turn' };
-    else if (acting) banner = { mine: false, text: `Waiting for ${acting.name}…` };
-  } else if (usesTurns(party) && party.phase === 'showdown') {
-    banner = { mine: isHost, text: isHost ? 'Showdown: award the pot' : `Showdown · ${host?.name ?? 'the host'} awards the pot` };
-  }
   // Card mode works out the winner itself, so the host never awards by hand.
   const showAward = party.settings.mode !== 'cards' && isHost && (party.phase === 'showdown' || (dialog === 'award' && playing));
 
   return (
-    <div className="room" data-tab={tab}>
-      <header className="topbar">
-        <Link className="brand" href="/" aria-label="Pixel Pot home">
-          <ChipFace size={24} />
-          <span>Pixel Pot</span>
-        </Link>
-        <span className="syncDot" data-sync={sync} role="status" aria-label={sync === 'offline' ? 'Reconnecting' : 'Live'} />
-        <button
-          className="btn small quiet muteBtn"
-          aria-pressed={muted}
-          aria-label="Mute turn sound"
-          title={muted ? 'Turn sound on' : 'Turn sound off'}
-          onClick={() => {
-            saveMuted(!muted);
-            setMuted(!muted);
-          }}
-        >
-          <Speaker muted={muted} />
-        </button>
-        <button className="btn small quiet codeTag" onClick={() => setDialog('invite')} aria-label={`Table code ${code}. Invite players`}>
-          <b>{code}</b>
-        </button>
-        <button className="btn small quiet" onClick={() => setDialog('menu')}>
-          Menu
-        </button>
-      </header>
-
-      {needsDatabase && (
-        <p className="banner" role="alert">
-          This site has no database connected yet, so tables won&apos;t stay in sync between players. The site owner
-          needs to connect Upstash Redis in Vercel (see the README).
-        </p>
-      )}
-
-      <nav className="tabs" aria-label="View">
-        <button className="btn small quiet" data-pressed={tab === 'table'} aria-pressed={tab === 'table'} onClick={() => setTab('table')}>
-          Table
-        </button>
-        <button className="btn small quiet" data-pressed={tab === 'log'} aria-pressed={tab === 'log'} onClick={() => setTab('log')}>
-          Hand log
-        </button>
-      </nav>
-
-      <main className="panes">
-        <section className="tablePane" aria-label="Table">
-          {banner && (
-            <p className="turnBanner" data-mine={banner.mine} role="status" aria-live="polite">
-              {banner.text}
-            </p>
-          )}
-          <div className="feltHead">
-            <span>{playing ? `Hand ${party.handNo}` : lobby ? 'Lobby' : `After hand ${party.handNo}`}</span>
-            <span className="feltGame">
-              {tableLine(party.settings)
-                .split(' · ')
-                .map((part) => (
-                  <span key={part}>{part}</span>
-                ))}
-            </span>
-          </div>
-
-          <TableView
-            party={party}
-            meId={me?.id ?? null}
-            myCards={me ? myCards : null}
-            busy={busy}
-            act={me ? act : undefined}
-            lobby={
-              <div className="lobby">
-                <p className="potLabel">Table code</p>
-                <p className="lobbyCode" aria-label={code.split('').join(' ')}>
-                  {code}
-                </p>
-                <p style={{ maxWidth: '24ch' }}>
-                  {!isHost
-                    ? `${host?.name ?? 'The host'} starts when everyone is in.`
-                    : party.players.length > 1 && party.players.every((p) => p.bot || p.id === party.hostId)
-                      ? 'Your AI opponents are ready. Start when you are.'
-                      : 'Start the first hand when everyone has sat down.'}
-                </p>
-                <button className="btn small" onClick={() => setDialog('invite')}>
-                  Invite players
-                </button>
-              </div>
-            }
-          />
-
-          <ol className="feed" aria-label="Latest moves">
-            {feed.map((f) => (
-              <li key={f.id} data-kind={f.kind}>
-                {f.text}
-              </li>
-            ))}
-          </ol>
-
-          {me ? (
+    <>
+      <RoomScreen
+        party={party}
+        me={me}
+        myCards={me ? myCards : null}
+        sync={sync}
+        needsDatabase={needsDatabase}
+        busy={busy}
+        act={act}
+        muted={muted}
+        onToggleMute={() => {
+          saveMuted(!muted);
+          setMuted(!muted);
+        }}
+        openDialog={setDialog}
+        dialogOpen={dialog !== null || showAward}
+        dock={
+          me ? (
             <ActionDock party={party} me={me} isHost={isHost} busy={busy} act={act} onAward={() => setDialog('award')} />
           ) : (
             <JoinDock
@@ -337,13 +237,9 @@ export default function PartyRoom({ code }: { code: string }) {
                 apply(p);
               }}
             />
-          )}
-        </section>
-
-        <section className="logPane" aria-label="Hand log">
-          <Ledger party={party} meId={me?.id} />
-        </section>
-      </main>
+          )
+        }
+      />
 
       {showAward && (
         <AwardDialog
@@ -374,6 +270,231 @@ export default function PartyRoom({ code }: { code: string }) {
           {toast.text}
         </div>
       )}
+    </>
+  );
+}
+
+type Panel = 'chips' | 'log';
+
+/** A panel that drops down from under the top bar. Takes focus when it opens; Esc closes it. */
+function DropPanel({ id, label, onClose, children }: { id: string; label: string; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    ref.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close.current();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+  return (
+    <div id={id} ref={ref} className="dropPanel" role="dialog" aria-label={label} tabIndex={-1}>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * The table screen: top bar, the table filling the rest, overlays for the turn
+ * banner and recent moves, and the dock pinned at the bottom. No data fetching,
+ * so /dev/table can show the same screen with sample tables.
+ */
+export function RoomScreen({
+  party,
+  me,
+  myCards,
+  sync,
+  needsDatabase = false,
+  busy,
+  act,
+  muted,
+  onToggleMute,
+  openDialog,
+  dialogOpen,
+  dock,
+  initialPanel = null,
+}: {
+  party: Party;
+  me: Player | null;
+  myCards: Card[] | null;
+  sync: Sync;
+  needsDatabase?: boolean;
+  busy: boolean;
+  act: (action: Action) => Promise<boolean>;
+  muted: boolean;
+  onToggleMute: () => void;
+  openDialog: (dialog: 'invite' | 'menu') => void;
+  dialogOpen: boolean;
+  dock: ReactNode;
+  initialPanel?: Panel | null;
+}) {
+  const code = party.code;
+  const isHost = Boolean(me && me.id === party.hostId);
+  const host = party.players.find((p) => p.id === party.hostId);
+  const playing = party.phase !== 'idle';
+  const lobby = !playing && party.handNo === 0;
+  const myTurn = Boolean(me && legalActions(party, me.id).fold);
+  const feed = party.feed.slice(-3).reverse();
+
+  // Chips and Log drop down from the top bar, one at a time.
+  const [panel, setPanel] = useState<Panel | null>(initialPanel);
+  const panelButton = { chips: useRef<HTMLButtonElement>(null), log: useRef<HTMLButtonElement>(null) };
+  const closePanel = () => {
+    if (!panel) return;
+    setPanel(null);
+    panelButton[panel].current?.focus();
+  };
+  const togglePanel = (kind: Panel) => (panel === kind ? closePanel() : setPanel(kind));
+  // A dialog (menu, invite, award) takes over; it handles focus itself.
+  useEffect(() => {
+    if (dialogOpen) setPanel(null);
+  }, [dialogOpen]);
+
+  // The table fits in the space the dock leaves: above it, or beside it on short landscape screens.
+  const dockRef = useRef<HTMLDivElement>(null);
+  const [dockBox, setDockBox] = useState({ w: 0, h: 0 });
+  useLayoutEffect(() => {
+    const el = dockRef.current;
+    if (!el) return;
+    const measure = () => setDockBox({ w: el.offsetWidth, h: el.offsetHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  // The banner says whose turn it is. Free-play tables have no turns, so no banner.
+  let banner: { text: string; mine: boolean } | null = null;
+  if (usesTurns(party) && party.phase === 'live') {
+    const dealer = party.players.find((p) => p.id === party.dealerId);
+    const acting = party.players.find((p) => p.id === party.toActId);
+    if (party.awaitingDeal) {
+      const mine = Boolean(me && (me.id === party.dealerId || isHost));
+      banner = { mine, text: mine ? `Deal the ${party.awaitingDeal}` : `Waiting for ${dealer?.name ?? 'the dealer'} to deal the ${party.awaitingDeal}…` };
+    } else if (myTurn) banner = { mine: true, text: 'Your turn' };
+    else if (acting) banner = { mine: false, text: `Waiting for ${acting.name}…` };
+  } else if (usesTurns(party) && party.phase === 'showdown') {
+    banner = { mine: isHost, text: isHost ? 'Showdown: award the pot' : `Showdown · ${host?.name ?? 'the host'} awards the pot` };
+  }
+
+  const panelToggle = (kind: Panel, text: string) => (
+    <button
+      ref={panelButton[kind]}
+      className="btn small quiet"
+      data-pressed={panel === kind}
+      aria-expanded={panel === kind}
+      aria-controls={`panel-${kind}`}
+      onClick={() => togglePanel(kind)}
+    >
+      {text}
+    </button>
+  );
+
+  return (
+    <div className="room">
+      <header className="topbar">
+        <Link className="brand" href="/" aria-label="Pixel Pot home">
+          <ChipFace size={24} />
+          <span>Pixel Pot</span>
+        </Link>
+        <span className="syncDot" data-sync={sync} role="status" aria-label={sync === 'offline' ? 'Reconnecting' : 'Live'} />
+        <button
+          className="btn small quiet muteBtn"
+          aria-pressed={muted}
+          aria-label="Mute turn sound"
+          title={muted ? 'Turn sound on' : 'Turn sound off'}
+          onClick={onToggleMute}
+        >
+          <Speaker muted={muted} />
+        </button>
+        <button className="btn small quiet codeTag" onClick={() => openDialog('invite')} aria-label={`Table code ${code}. Invite players`}>
+          <b>{code}</b>
+        </button>
+        {panelToggle('chips', 'Chips')}
+        {panelToggle('log', 'Log')}
+        <button className="btn small quiet" onClick={() => openDialog('menu')}>
+          Menu
+        </button>
+        {panel && (
+          <DropPanel id={`panel-${panel}`} label={panel === 'chips' ? 'Chip counts' : 'Hand log'} onClose={closePanel}>
+            {panel === 'chips' ? <ChipCounts party={party} meId={me?.id} /> : <HandLog party={party} />}
+          </DropPanel>
+        )}
+      </header>
+
+      {needsDatabase && (
+        <p className="banner" role="alert">
+          This site has no database connected yet, so tables won&apos;t stay in sync between players. The site owner
+          needs to connect Upstash Redis in Vercel (see the README).
+        </p>
+      )}
+
+      <main
+        className="stage"
+        aria-label="Table"
+        style={{ '--dock-w': `${dockBox.w}px`, '--dock-h': `${dockBox.h}px` } as CSSProperties}
+      >
+        {panel && <div className="panelScrim" onClick={closePanel} aria-hidden="true" />}
+        {banner && (
+          <p className="turnBanner" data-mine={banner.mine} role="status" aria-live="polite">
+            {banner.text}
+          </p>
+        )}
+
+        <div className="hud">
+          <div className="feltHead">
+            <span>{playing ? `Hand ${party.handNo}` : lobby ? 'Lobby' : `After hand ${party.handNo}`}</span>
+            <span className="feltGame">
+              {tableLine(party.settings)
+                .split(' · ')
+                .map((part) => (
+                  <span key={part}>{part}</span>
+                ))}
+            </span>
+          </div>
+          <ol className="feed" aria-label="Latest moves">
+            {feed.map((f) => (
+              <li key={f.id} data-kind={f.kind}>
+                {f.text}
+              </li>
+            ))}
+          </ol>
+        </div>
+
+        <div className="tvBox">
+          <TableView
+            party={party}
+            meId={me?.id ?? null}
+            myCards={me ? myCards : null}
+            busy={busy}
+            act={me ? act : undefined}
+            lobby={
+              <div className="lobby">
+                <p className="potLabel">Table code</p>
+                <p className="lobbyCode" aria-label={code.split('').join(' ')}>
+                  {code}
+                </p>
+                <p style={{ maxWidth: '24ch' }}>
+                  {!isHost
+                    ? `${host?.name ?? 'The host'} starts when everyone is in.`
+                    : party.players.length > 1 && party.players.every((p) => p.bot || p.id === party.hostId)
+                      ? 'Your AI opponents are ready. Start when you are.'
+                      : 'Start the first hand when everyone has sat down.'}
+                </p>
+                <button className="btn small" onClick={() => openDialog('invite')}>
+                  Invite players
+                </button>
+              </div>
+            }
+          />
+        </div>
+
+        <div className="dockWrap" ref={dockRef}>
+          {dock}
+        </div>
+      </main>
     </div>
   );
 }
