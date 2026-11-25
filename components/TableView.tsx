@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { DEAL_MS, FLIP_MS, FOLD_MS, SWEEP_MS, drawScene, handsBox, personAt, seatAnchors, type Motion, type SceneData } from './scene/draw';
 import { handsSize, myCardWidth } from './scene/hands';
-import { BET_INSET, POT_SPOT, arrangeSeats, onFelt, spots } from './scene/layout';
+import { BET_INSET, BOARD_Z, POT_SPOT, arrangeSeats, onFelt, spots } from './scene/layout';
 import { idle, poseOf } from './scene/people';
 import { fitCamera, project, type Camera } from './scene/project';
 import { chipTowers } from '@/lib/chips';
@@ -216,11 +216,12 @@ export default function TableView({
 
   // My chips sit on the felt just above my hands, between them and the middle.
   const myZ = useMemo(() => {
-    if (!cam || !hands) return -0.42;
-    const top = cam.h - handsH - 3;
+    if (!cam || !hands || !size) return -0.42;
+    // Room for "You have: …" (about 18 CSS px) between the chips and my hands.
+    const top = cam.h - handsH - 3 - 18 / size.q;
     for (let z = -0.5; z < -0.22; z += 0.01) if (project(cam, 0, 0, z).y <= top) return z;
     return -0.22;
-  }, [cam, hands, handsH]);
+  }, [cam, hands, handsH, size]);
 
   const data: SceneData = {
     seats: seats.map(({ player: p, seat, me: mine }) => {
@@ -365,9 +366,16 @@ export default function TableView({
     .filter(({ i }) => i > 0)
     .sort((m, n) => m.a.plate.x - n.a.plate.x)
     .forEach(({ a }) => {
-      const clash = () => placed.some((o) => Math.abs(o.x - a.plate.x) < PLATE.w && Math.abs(o.y - (a.plate.y - a.plate.lift)) < PLATE.h);
+      const clashing = () => placed.find((o) => Math.abs(o.x - a.plate.x) < PLATE.w && Math.abs(o.y - (a.plate.y - a.plate.lift)) < PLATE.h);
       // Lift a plate's height at a time, but never off the top of the scene.
-      while (clash() && a.plate.lift < PLATE.h * 3 && a.plate.y - a.plate.lift - PLATE.h * 2 >= 0) a.plate.lift += PLATE.h;
+      while (clashing() && a.plate.lift < PLATE.h * 3 && a.plate.y - a.plate.lift - PLATE.h * 2 >= 0) a.plate.lift += PLATE.h;
+      // No room above (short screens): slide it sideways, clear of the plate it hits.
+      const maxX = cam ? cam.w * q - PLATE_HALF : 0;
+      for (let tries = 0, hit = clashing(); hit && tries < 6; tries++, hit = clashing()) {
+        // Right of the plate it hits, or left of it when that runs off the edge.
+        const right = hit.x + PLATE.w + 2;
+        a.plate.x = right <= maxX ? right : Math.max(PLATE_HALF, hit.x - PLATE.w - 2);
+      }
       placed.push({ x: a.plate.x, y: a.plate.y - a.plate.lift });
     });
 
@@ -461,9 +469,16 @@ export default function TableView({
             </div>
           ) : (
             (playing ? total > 0 : lastHand) && (
-              <div className="potLabel3d" style={at(project(cam, POT_SPOT.x + 0.15, 0, POT_SPOT.z).x, project(cam, 0, 0, POT_SPOT.z).y)} aria-live="polite">
+              <div
+                className="potLabel3d"
+                // During a hand, beside the pot's chips; between hands (no chips), centred where the pot sits.
+                data-centred={!playing}
+                style={playing ? at(project(cam, POT_SPOT.x + 0.12, 0, POT_SPOT.z).x, project(cam, POT_SPOT.x, 0, POT_SPOT.z).y) : at(project(cam, POT_SPOT.x - 0.02, 0, BOARD_Z).x, project(cam, 0, 0, BOARD_Z).y)}
+                aria-live="polite"
+              >
                 <b>{chips(playing ? total : lastHand?.kind === 'hand' ? lastHand.pot : 0)}</b>
-                <span>{party.phase === 'showdown' ? 'Showdown' : potLine}</span>
+                {/* Between hands just the amount: the feed already says who won it. */}
+                {playing ? <span>{party.phase === 'showdown' ? 'Showdown' : 'Pot'}</span> : <span className="sr">{potLine}</span>}
                 {sidePots.length > 1 && (
                   <span className="sidePots">
                     {sidePots.map((pot, i) => (

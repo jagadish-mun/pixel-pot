@@ -890,10 +890,6 @@ select.input {
   }
 }
 
-.myHand {
-  display: none;
-}
-
 /* The game and the last three moves, top left, one line each. */
 .hud {
   position: absolute;
@@ -1343,9 +1339,15 @@ select.input {
   z-index: 1;
   display: grid;
   gap: 1px;
-  transform: translateY(-6px);
+  transform: translateY(-50%);
   pointer-events: none;
   text-shadow: 2px 2px 0 var(--ink);
+}
+
+.potLabel3d[data-centred='true'] {
+  justify-items: center;
+  text-align: center;
+  transform: translate(-50%, -50%);
 }
 
 .potLabel3d b {
@@ -1442,12 +1444,6 @@ select.input {
 .peekArea:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
-}
-
-.plate .myHand {
-  margin: 0;
-  font-size: 12px;
-  line-height: 1.2;
 }
 
 /* Mine stays left of my cards: the hand name wraps rather than running under them. */

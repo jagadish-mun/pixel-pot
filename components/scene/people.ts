@@ -3,7 +3,7 @@
  * icon printed on like a mask. Drawn procedurally from a 48-pixel-tall design
  * at whatever height the seat's distance calls for, once per pose, and cached.
  */
-import { facePattern, hash } from '@/lib/faces';
+import { facePattern, hash } from '../../lib/faces';
 import type { Party, Player } from '@/lib/types';
 import { BONE, INK, offscreen } from './glyphs';
 
@@ -112,13 +112,16 @@ function paintPerson(ctx: CanvasRenderingContext2D, look: PersonLook, u: number)
 
   /* Torso: sloped shoulders down to the rail, lit on the left. */
   const sh = 33 + lean;
-  rect(9, sh - 2, 32, 3, INK);
-  rect(5, sh, 40, 54 - sh, INK);
-  rect(10, sh - 1, 30, 2, shirt.mid);
-  rect(6, sh + 1, 38, 54 - sh - 1, shirt.mid);
-  rect(6, sh + 1, 10, 54 - sh - 1, shirt.lit);
-  rect(11, sh - 1, 6, 2, shirt.lit);
-  rect(33, sh + 1, 11, 54 - sh - 1, shirt.shade);
+  rect(10, sh - 2, 30, 3, INK);
+  rect(7, sh, 36, 54 - sh, INK);
+  rect(11, sh - 1, 28, 2, shirt.mid);
+  rect(8, sh + 1, 34, 54 - sh - 1, shirt.mid);
+  rect(8, sh + 1, 9, 54 - sh - 1, shirt.lit);
+  rect(12, sh - 1, 6, 2, shirt.lit);
+  rect(32, sh + 1, 10, 54 - sh - 1, shirt.shade);
+  // Where the arms hang against the body: a line of shadow down each side.
+  shadow(13, sh + 4, 1, 54 - sh - 8, 0.55);
+  shadow(36, sh + 4, 1, 54 - sh - 8, 0.55);
   // A V collar.
   rect(21, sh - 1, 8, 2, shirt.deep);
   rect(23, sh + 1, 4, 2, shirt.deep);

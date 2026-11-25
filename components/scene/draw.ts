@@ -3,7 +3,7 @@
  * pixels (a scanline fill, no anti-aliasing), so it stays crisp pixel art when
  * the canvas is scaled up.
  */
-import { denom, chipTowers } from '@/lib/chips';
+import { denom, chipTowers } from '../../lib/chips';
 import type { Card } from '@/lib/cards';
 import { BONE, GLYPHS, INK, SMALL_SUITS, SUITS, offscreen, stamp } from './glyphs';
 import { handsSize, handsSprite, type HandsMode } from './hands';
@@ -476,7 +476,7 @@ export function drawScene(ctx: Ctx, cam: Camera, data: SceneData, motion: Motion
   });
 
   for (const s of data.seats) {
-    const { stack: stackAt, bet: betAt, cards: cardsAt } = spots(s.seat, s.me, data.myZ);
+    const { stack: stackAt, bet: betAt } = spots(s.seat, s.me, data.myZ);
     if (s.stack > 0) items.push({ z: stackAt.z, draw: () => drawChips(ctx, cam, s.stack, stackAt) });
     if (s.bet > 0) items.push({ z: betAt.z, draw: () => drawChips(ctx, cam, s.bet, betAt) });
     if (s.me) continue;
@@ -491,14 +491,16 @@ export function drawScene(ctx: Ctx, cam: Camera, data: SceneData, motion: Motion
     }
     // Shown cards, face up on the felt in front of them, turning over.
     if (s.shown) {
+      // Laid out where the bets go: by showdown the bets are in the pot, and the stack would hide them by the rail.
+      const showAt = onFelt(s.seat, BET_INSET);
       const started = motion.shown.get(s.id);
       const turn = started === undefined ? 1 : Math.min(1, Math.max(0, (now - started) / FLIP_MS));
       const n = s.shown.length;
       const w = n > 2 ? SHOWN_CARD.w * 0.8 : SHOWN_CARD.w;
       s.shown.forEach((card, k) => {
-        const x = cardsAt.x + (k - (n - 1) / 2) * (w + 0.008);
+        const x = showAt.x + (k - (n - 1) / 2) * (w + 0.008);
         const win = data.winning.has(card);
-        items.push({ z: cardsAt.z, draw: () => drawFlatCard(ctx, cam, card, { x, y: 0, z: cardsAt.z }, { w, d: SHOWN_CARD.d }, { turn, outline: win && turn >= 1 ? GOLD : undefined }) });
+        items.push({ z: showAt.z, draw: () => drawFlatCard(ctx, cam, card, { x, y: 0, z: showAt.z }, { w, d: SHOWN_CARD.d }, { turn, outline: win && turn >= 1 ? GOLD : undefined }) });
       });
     }
   }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { arrangeSeats, BET_INSET, MY_SEAT, onFelt, seatLayout, STACK_INSET } from '../components/scene/layout';
+import { personAt } from '../components/scene/draw';
+import { poseOf, spriteSize } from '../components/scene/people';
 import { fitCamera, project, TABLE_R } from '../components/scene/project';
 
 const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -73,15 +75,38 @@ describe('projection', () => {
       const c = fitCamera(w, h, { top: 20, side: 30, bottom: 4 });
       expect(c.pitch).toBeGreaterThanOrEqual(36);
       expect(c.pitch).toBeLessThanOrEqual(62);
+      // Each opponent's whole figure (a sprite standing on the rail) is inside the margins.
       for (const s of seatLayout(9)) {
-        const p = project(c, s.x, 0.3, s.z);
-        expect(p.x).toBeGreaterThanOrEqual(29);
-        expect(p.x).toBeLessThanOrEqual(w - 29);
-        expect(p.y).toBeGreaterThanOrEqual(19);
+        const p = personAt(c, s);
+        const { w: sw } = spriteSize(p.height);
+        expect(p.x - sw / 2).toBeGreaterThanOrEqual(29);
+        expect(p.x + sw / 2).toBeLessThanOrEqual(w - 29);
+        expect(p.y - p.height).toBeGreaterThanOrEqual(19);
       }
       // The near rail is at the bottom.
       expect(project(c, 0, 0, -TABLE_R - 0.03).y).toBeLessThanOrEqual(h - 3);
       expect(project(c, 0, 0, -TABLE_R - 0.03).y).toBeGreaterThan(h - 40);
     }
+  });
+});
+
+describe('poseOf', () => {
+  const party = (phase: 'idle' | 'live' | 'showdown') => ({ phase }) as Parameters<typeof poseOf>[0];
+  const player = (p: Partial<Parameters<typeof poseOf>[1]>) => ({ stack: 500, inHand: true, folded: false, ...p }) as Parameters<typeof poseOf>[1];
+  const none = { acting: false, showing: false };
+
+  it('holds cards in a hand, leans in on their turn, crosses arms when folded', () => {
+    expect(poseOf(party('live'), player({}), none)).toBe('hold');
+    expect(poseOf(party('live'), player({}), { acting: true, showing: false })).toBe('think');
+    expect(poseOf(party('live'), player({ folded: true }), none)).toBe('fold');
+    // All in, still holding cards.
+    expect(poseOf(party('live'), player({ stack: 0 }), none)).toBe('hold');
+  });
+
+  it('rests between hands or once their cards are shown, and greys out with no chips', () => {
+    expect(poseOf(party('idle'), player({}), none)).toBe('rest');
+    expect(poseOf(party('showdown'), player({}), { acting: false, showing: true })).toBe('rest');
+    expect(poseOf(party('idle'), player({ stack: 0 }), none)).toBe('out');
+    expect(poseOf(party('live'), player({ stack: 0, inHand: false }), none)).toBe('out');
   });
 });
