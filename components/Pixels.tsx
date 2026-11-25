@@ -136,3 +136,116 @@ export function Face({ seed, size = 36 }: { seed: string; size?: number }) {
     </svg>
   );
 }
+
+/** A pixel speaker, with a cross when muted. */
+export function Speaker({ muted, size = 20 }: { muted: boolean; size?: number }) {
+  const body: [number, number, number, number][] = [
+    [1, 3, 2, 3],
+    [3, 2, 1, 5],
+    [4, 1, 1, 7],
+  ];
+  const sound: [number, number, number, number][] = muted
+    ? [
+        [6, 2, 1, 1],
+        [8, 2, 1, 1],
+        [7, 3, 1, 1],
+        [6, 4, 1, 1],
+        [8, 4, 1, 1],
+      ]
+    : [
+        [6, 3, 1, 3],
+        [7, 2, 1, 1],
+        [7, 6, 1, 1],
+        [8, 1, 1, 7],
+      ];
+  return (
+    <svg width={size} height={size} viewBox="0 0 10 9" shapeRendering="crispEdges" aria-hidden="true">
+      {[...body, ...sound].map(([x, y, w, h], i) => (
+        <rect key={i} x={x} y={y} width={w} height={h} fill="currentColor" />
+      ))}
+    </svg>
+  );
+}
+
+/* ---------------------------------- cards ---------------------------------- */
+
+// 7×7 suit bitmaps, drawn as pixels so they stay crisp at any size.
+const SUIT_PIXELS: Record<string, string[]> = {
+  h: ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'],
+  d: ['...X...', '..XXX..', '.XXXXX.', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'],
+  s: ['...X...', '..XXX..', '.XXXXX.', 'XXXXXXX', 'XXXXXXX', '...X...', '..XXX..'],
+  c: ['..XXX..', '..XXX..', 'XX.X.XX', 'XXXXXXX', 'XX.X.XX', '...X...', '..XXX..'],
+};
+const CARD_RED = '#d8352b';
+
+function SuitPixels({ suit, x, y, color }: { suit: string; x: number; y: number; color: string }) {
+  return (
+    <>
+      {SUIT_PIXELS[suit].flatMap((row, dy) =>
+        [...row].map((cell, dx) => (cell === 'X' ? <rect key={`${dx}-${dy}`} x={x + dx} y={y + dy} width={1} height={1} fill={color} /> : null)),
+      )}
+    </>
+  );
+}
+
+/** A face-up playing card ("As", "Td"), 20×28 pixel grid, sized by its container. */
+export function PlayingCard({ card }: { card: string }) {
+  const rank = card[0] === 'T' ? '10' : card[0];
+  const suit = card[1];
+  const color = suit === 'h' || suit === 'd' ? CARD_RED : INK;
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 20 28" shapeRendering="crispEdges" aria-hidden="true">
+      <rect width={20} height={28} fill={INK} />
+      <rect x={1} y={1} width={18} height={26} fill="#f4ead5" />
+      <text
+        x={rank.length === 2 ? 1.5 : 2.5}
+        y={10}
+        fontFamily="'Press Start 2P', monospace"
+        fontSize={8}
+        letterSpacing={rank.length === 2 ? -1 : 0}
+        fill={color}
+      >
+        {rank}
+      </text>
+      <SuitPixels suit={suit} x={7} y={15} color={color} />
+    </svg>
+  );
+}
+
+/** The back of a card: a red pixel lattice inside a bone border. */
+export function CardBack() {
+  const cells: [number, number][] = [];
+  for (let y = 3; y < 11; y++) for (let x = 3; x < 7; x++) if ((x + y) % 2 === 0) cells.push([x, y]);
+  return (
+    <svg width="100%" height="100%" viewBox="0 0 10 14" shapeRendering="crispEdges" aria-hidden="true">
+      <rect width={10} height={14} fill={INK} />
+      <rect x={1} y={1} width={8} height={12} fill="#f4ead5" />
+      <rect x={2} y={2} width={6} height={10} fill="#e2483d" />
+      {cells.map(([x, y]) => (
+        <rect key={`${x}-${y}`} x={x} y={y} width={1} height={1} fill="#9c2a2a" />
+      ))}
+    </svg>
+  );
+}
+
+// Robot heads for computer players (7×7, mirrored like Face), picked by seed.
+const ROBOTS = [
+  ['...X...', '.XXXXX.', '.X.X.X.', '.XXXXX.', '.X...X.', '.XXXXX.', '..X.X..'],
+  ['X.....X', '.XXXXX.', 'XX.X.XX', '.XXXXX.', '.XX.XX.', '.XXXXX.', '.X...X.'],
+  ['..XXX..', '.XXXXX.', 'X.X.X.X', 'XXXXXXX', 'X.XXX.X', '.XXXXX.', 'XX...XX'],
+];
+
+/** A pixel robot head: the face of a computer player. */
+export function RobotFace({ seed, size = 36 }: { seed: string; size?: number }) {
+  const h = hash(seed);
+  const rows = ROBOTS[h % ROBOTS.length];
+  const color = FACE_COLORS[(h >>> 4) % FACE_COLORS.length];
+  return (
+    <svg className="face" width={size} height={size} viewBox="0 0 9 9" shapeRendering="crispEdges" aria-hidden="true">
+      <rect width={9} height={9} fill="#2b2440" />
+      {rows.flatMap((row, y) =>
+        [...row].map((cell, x) => (cell === 'X' ? <rect key={`${x}-${y}`} x={x + 1} y={y + 1} width={1} height={1} fill={color} /> : null)),
+      )}
+    </svg>
+  );
+}

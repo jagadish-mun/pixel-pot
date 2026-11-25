@@ -70,7 +70,8 @@ p {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
   color: inherit;
 }
@@ -403,6 +404,135 @@ input {
   width: calc(100% - var(--px) * 2);
 }
 
+a.btn {
+  text-decoration: none;
+}
+
+/* ---------- host setup ---------- */
+
+.setup {
+  max-width: 560px;
+  display: grid;
+  gap: 16px;
+  padding-top: 24px;
+}
+
+.setup > .linkish {
+  justify-self: start;
+}
+
+.setupTitle {
+  font-family: var(--display);
+  font-size: 20px;
+  line-height: 1.4;
+  color: var(--gold);
+  text-shadow: 3px 3px 0 var(--red);
+}
+
+.setupSection {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.setupSection legend {
+  padding: 0 0 8px;
+  font-family: var(--display);
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--dim);
+}
+
+.fieldLabel {
+  margin-top: 4px;
+}
+
+.choice {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.choice .btn {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+/* The picked option in any toggle group: gold, and pushed in. */
+.choice .btn[data-pressed='true'],
+.presets .btn[data-pressed='true'],
+.modeToggle .btn[data-pressed='true'] {
+  --face: var(--gold);
+  --edge: var(--gold-dk);
+  --text: var(--ink);
+}
+
+.presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+}
+
+.presetDetail,
+.modeHelp {
+  font-family: var(--body);
+  font-size: 16px;
+  line-height: 1.25;
+}
+
+.modeToggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.modeToggle .btn {
+  min-height: 112px;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 12px 8px;
+  font-size: 14px;
+}
+
+.setupSummary {
+  padding: 12px;
+  background: var(--ink);
+  color: var(--gold);
+  font-family: var(--display);
+  font-size: 10px;
+  line-height: 1.8;
+  text-align: center;
+}
+
+select.input {
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--bone) 50%), linear-gradient(-45deg, transparent 50%, var(--bone) 50%);
+  background-position: calc(100% - 22px) 50%, calc(100% - 14px) 50%;
+  background-size: 8px 8px;
+  background-repeat: no-repeat;
+}
+
+.input:disabled {
+  opacity: 0.6;
+}
+
+.settingsList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.settingsList > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settingsList dd {
+  margin: 0;
+  text-align: right;
+}
+
 .how {
   margin: 48px auto 0;
   max-width: 56ch;
@@ -519,68 +649,31 @@ input {
 
 /* ---------- the felt ---------- */
 
-.felt {
-  padding: 16px 12px 16px;
-  background-color: var(--felt);
-  background-image: repeating-conic-gradient(var(--felt-dk) 0% 25%, transparent 0% 50%);
-  background-size: 8px 8px;
-  box-shadow:
-    0 calc(var(--px) * -1) 0 0 var(--ink),
-    0 var(--px) 0 0 var(--ink),
-    calc(var(--px) * -1) 0 0 0 var(--ink),
-    var(--px) 0 0 0 var(--ink),
-    inset 0 0 0 var(--px) #6b4326,
-    inset 0 0 0 calc(var(--px) * 2) #8a5a34,
-    inset 0 0 0 calc(var(--px) * 3) var(--ink);
-  margin: var(--px);
-}
-
 .feltHead {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 12px 0;
+  padding: 0 4px;
   font-family: var(--display);
   font-size: 10px;
-  color: #cfeedd;
+  color: var(--dim);
+  flex-wrap: wrap;
 }
 
-.pot {
+.feltGame {
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 16px;
-  min-height: 104px;
-  padding: 12px 12px 16px;
+  flex-wrap: wrap;
+  gap: 4px 0;
 }
 
-.potPile {
-  display: flex;
-  align-items: flex-end;
+/* Parts of "NL Hold'em · Blinds 5/10 · Ante 1" wrap between, never inside. */
+.feltGame > span {
+  white-space: nowrap;
 }
 
-.potText {
-  display: grid;
-  gap: 8px;
-  padding-bottom: 4px;
-}
-
-.potAmount {
-  font-family: var(--display);
-  font-size: 32px;
-  line-height: 1;
-  color: var(--gold);
-  text-shadow: 4px 4px 0 var(--ink);
-}
-
-.potAmount[data-bump='true'] {
-  animation: bump 0.25s steps(3);
-}
-
-@keyframes bump {
-  50% {
-    transform: translateY(-8px);
-  }
+.feltGame > span + span::before {
+  content: '·';
+  padding: 0 8px;
 }
 
 .potLabel {
@@ -603,84 +696,6 @@ input {
   margin-right: -0.25em;
   color: var(--gold);
   text-shadow: 4px 4px 0 var(--ink);
-}
-
-.seats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0;
-  padding: 4px 12px 12px;
-  list-style: none;
-}
-
-.seat {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 4px 8px;
-  align-items: center;
-  padding: 8px;
-  background: var(--panel);
-  box-shadow:
-    0 calc(var(--px) * -1) 0 0 var(--ink),
-    0 var(--px) 0 0 var(--ink),
-    calc(var(--px) * -1) 0 0 0 var(--ink),
-    var(--px) 0 0 0 var(--ink);
-}
-
-.seat[data-me='true'] {
-  background: var(--panel-hi);
-  box-shadow:
-    0 calc(var(--px) * -1) 0 0 var(--gold),
-    0 var(--px) 0 0 var(--gold),
-    calc(var(--px) * -1) 0 0 0 var(--gold),
-    var(--px) 0 0 0 var(--gold);
-}
-
-.seat[data-out='true'] .face,
-.seat[data-out='true'] .seatName,
-.seat[data-out='true'] .seatStack {
-  opacity: 0.45;
-}
-
-.seatName {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: 18px;
-  line-height: 1.1;
-}
-
-.seatName > span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.seatStack {
-  font-family: var(--display);
-  font-size: 14px;
-  line-height: 1.3;
-}
-
-.seatFoot {
-  grid-column: 1 / -1;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 28px;
-  font-size: 18px;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-
-.seatStatus {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 24px;
 }
 
 .tag {
@@ -710,6 +725,528 @@ input {
   background: #4a4163;
   color: var(--bone);
 }
+
+.tag.move {
+  background: #dff5e9;
+}
+
+/* Computer players: a small badge, and dots while they "think". */
+.tag.botTag {
+  margin-right: 3px;
+  background: #4cc9c0;
+  vertical-align: 2px;
+}
+
+.tag.thinking {
+  background: var(--gold);
+}
+
+.tag.thinking i {
+  font-style: normal;
+  animation: thinkDot 1.2s steps(1) infinite;
+}
+
+.tag.thinking i:nth-child(2) {
+  animation-delay: 0.3s;
+}
+
+.tag.thinking i:nth-child(3) {
+  animation-delay: 0.6s;
+}
+
+@keyframes thinkDot {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---------- table view: an oval felt with seats around it ---------- */
+
+.turnBanner {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  margin: 0 4px 12px;
+  padding: 10px 12px;
+  background: var(--panel);
+  color: var(--bone);
+  font-family: var(--display);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  box-shadow: 0 0 0 var(--px) var(--ink);
+}
+
+.turnBanner[data-mine='true'] {
+  padding: 12px;
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 20px;
+  text-transform: uppercase;
+  text-shadow: 2px 2px 0 rgba(255, 255, 255, 0.45);
+  animation: bannerIn 0.3s steps(3);
+}
+
+@keyframes bannerIn {
+  from {
+    transform: scale(1.12);
+  }
+}
+
+.tv {
+  /* How far seat centres sit in from the table's edges, and how much further in each bet sits. */
+  --edge-x: 40px;
+  --edge-y: 50px;
+  position: relative;
+  /* Full width, but never so tall that the oval runs off a short screen. */
+  width: min(100%, calc(72dvh * 5 / 7));
+  aspect-ratio: 5 / 7;
+  margin: 12px auto 0;
+}
+
+.tvFelt {
+  position: absolute;
+  inset: 28px 20px;
+  border-radius: 50%;
+  background-color: var(--felt);
+  background-image: repeating-conic-gradient(var(--felt-dk) 0% 25%, transparent 0% 50%);
+  background-size: 8px 8px;
+  box-shadow:
+    0 0 0 var(--px) var(--ink),
+    0 0 0 calc(var(--px) * 3) #8a5a34,
+    0 0 0 calc(var(--px) * 4) #6b4326,
+    0 0 0 calc(var(--px) * 5) var(--ink),
+    inset 0 0 0 var(--px) var(--felt-lt);
+}
+
+.tvCentre {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: 1;
+  width: 40%;
+  transform: translate(-50%, -50%);
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  text-align: center;
+}
+
+.tvBoard {
+  display: flex;
+  gap: 2px;
+}
+
+.cardSlot {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+}
+
+.tvBoard .cardSlot {
+  width: 17px;
+  height: 24px;
+}
+
+.cardSlot.empty {
+  background: rgba(12, 9, 22, 0.22);
+  box-shadow: inset 0 0 0 2px rgba(223, 245, 233, 0.3);
+}
+
+/* Cardless: the street has been dealt at the real table. */
+.cardSlot.empty[data-dealt='true'] {
+  background: var(--bone);
+  box-shadow:
+    inset 0 0 0 2px var(--ink),
+    2px 2px 0 0 var(--ink);
+}
+
+.cardSlot small {
+  font-family: var(--display);
+  font-size: 6px;
+  color: var(--felt-dk);
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+
+.cardSlot.face {
+  filter: drop-shadow(2px 2px 0 rgba(12, 9, 22, 0.55));
+}
+
+/* Part of a winning hand: lifted with a gold edge. */
+.cardSlot.face[data-win='true'] {
+  transform: translateY(-3px);
+  filter: drop-shadow(0 0 0 var(--gold)) drop-shadow(0 2px 0 var(--gold)) drop-shadow(0 -2px 0 var(--gold))
+    drop-shadow(2px 0 0 var(--gold)) drop-shadow(-2px 0 0 var(--gold));
+}
+
+/* Showdown: the card turns over as it appears. */
+.cardSlot.face[data-flip='true'] {
+  animation: cardFlip 0.4s steps(4);
+}
+
+@keyframes cardFlip {
+  from {
+    transform: scaleX(0);
+  }
+}
+
+/* Card tables need a readable board. */
+.tv[data-cards='true'] .tvBoard .cardSlot {
+  width: 22px;
+  height: 31px;
+}
+
+.faceCards {
+  display: flex;
+  gap: 2px;
+}
+
+.tvCards {
+  width: auto;
+  min-width: 44px;
+  height: auto;
+  padding: 2px 4px;
+  margin: 0 0 2px;
+}
+
+/* A seat showing face-up cards grows to fit them. */
+.tvSeat:has(.tvCards) {
+  width: auto;
+  min-width: 78px;
+}
+
+.tvSeat[data-won='true'] {
+  box-shadow:
+    0 0 0 var(--px) var(--gold),
+    0 0 0 calc(var(--px) * 2) var(--ink);
+}
+
+.myHand {
+  margin: 10px 4px 0;
+  text-align: center;
+  color: var(--dim);
+}
+
+.myHand b {
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--gold);
+}
+
+.tvPot {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+}
+
+.tvPotAmount {
+  font-family: var(--display);
+  font-size: 20px;
+  line-height: 1;
+  color: var(--gold);
+  text-shadow: 3px 3px 0 var(--ink);
+}
+
+.tvPotLine {
+  font-size: 15px;
+  line-height: 1.15;
+  color: #dff5e9;
+}
+
+.tvSidePots {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 8px;
+  font-family: var(--display);
+  font-size: 8px;
+  line-height: 1.6;
+  color: #dff5e9;
+}
+
+.tvCentre .lobby {
+  gap: 8px;
+  padding: 0;
+}
+
+.tvCentre .lobbyCode {
+  font-size: clamp(22px, 7vw, 36px);
+}
+
+.tvCentre .potLabel {
+  font-size: 15px;
+}
+
+.dealPrompt {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  width: 100%;
+  max-width: 200px;
+  padding: 10px 8px;
+  background: var(--bone);
+  color: var(--ink);
+  box-shadow:
+    0 0 0 var(--px) var(--ink),
+    8px 8px 0 0 rgba(12, 9, 22, 0.45);
+  line-height: 1.2;
+}
+
+.dealTitle {
+  font-family: var(--display);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--red-dk);
+  text-transform: uppercase;
+}
+
+.dealPrompt .dim {
+  color: #5a5070;
+}
+
+.dealPrompt .btn {
+  margin-bottom: 4px;
+}
+
+.tvSeats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Seats and bets are placed with --sx/--sy (portrait) or --wx/--wy (landscape), from -1 to 1. */
+.tvSeat,
+.tvBet {
+  position: absolute;
+  left: calc(50% + var(--sx) * (50% - var(--edge-x)));
+  top: calc(50% + var(--sy) * (50% - var(--edge-y)));
+  transform: translate(-50%, -50%);
+}
+
+.tvBet {
+  left: calc(50% + var(--sx) * (50% - var(--edge-x)) - var(--tbx));
+  top: calc(50% + var(--sy) * (50% - var(--edge-y)) - var(--tby));
+}
+
+.tvSeat {
+  z-index: 2;
+  display: grid;
+  justify-items: center;
+  width: 78px;
+  padding: 2px 2px 4px;
+  background: var(--panel);
+  box-shadow: 0 0 0 var(--px) var(--ink);
+  text-align: center;
+}
+
+.tvSeat[data-me='true'] {
+  background: var(--panel-hi);
+}
+
+.tvSeat[data-out='true'] > :not(.tvTags) {
+  opacity: 0.45;
+}
+
+/* Whose turn it is: a gold, pulsing seat with a pointer above it. */
+.tvSeat[data-turn='true'] {
+  z-index: 3;
+  background: #4a3a14;
+  box-shadow:
+    0 0 0 var(--px) var(--gold),
+    0 0 0 calc(var(--px) * 2) var(--ink),
+    0 0 20px 8px rgba(245, 184, 61, 0.55);
+  animation: seatGlow 1s steps(2) infinite;
+}
+
+@keyframes seatGlow {
+  50% {
+    box-shadow:
+      0 0 0 var(--px) var(--gold),
+      0 0 0 calc(var(--px) * 2) var(--ink),
+      0 0 8px 2px rgba(245, 184, 61, 0.25);
+  }
+}
+
+.tvPointer {
+  position: absolute;
+  top: -20px;
+  left: 50%;
+  width: 16px;
+  height: 12px;
+  transform: translateX(-50%);
+  background: var(--gold);
+  /* a stepped, pixel triangle pointing down */
+  clip-path: polygon(0 0, 100% 0, 100% 34%, 75% 34%, 75% 67%, 62% 67%, 62% 100%, 38% 100%, 38% 67%, 25% 67%, 25% 34%, 0 34%);
+  filter: drop-shadow(0 2px 0 var(--ink));
+  animation: pointerBob 0.6s steps(2) infinite;
+}
+
+@keyframes pointerBob {
+  50% {
+    transform: translate(-50%, 4px);
+  }
+}
+
+.tvFace {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin: -4px 0 -2px;
+}
+
+.timerRing {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.holeCards {
+  position: absolute;
+  top: -8px;
+  right: -6px;
+  display: flex;
+}
+
+.holeCards .cardSlot:nth-child(odd) {
+  transform: rotate(-8deg);
+}
+
+.holeCards .cardSlot:nth-child(even) {
+  transform: rotate(8deg);
+}
+
+.holeCards .cardSlot + .cardSlot {
+  margin-left: -5px;
+}
+
+.tvName {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  line-height: 1.1;
+}
+
+.tvStack {
+  font-family: var(--display);
+  font-size: 9px;
+  line-height: 1.5;
+  color: var(--gold);
+}
+
+.tvTags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  min-height: 13px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.tvTags .tag {
+  padding: 1px 3px;
+  font-size: 7px;
+}
+
+.tvBet {
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  font-family: var(--display);
+  font-size: 7px;
+  color: #fff;
+  text-shadow: 2px 2px 0 var(--ink);
+  transition:
+    left 0.4s steps(4),
+    top 0.4s steps(4),
+    opacity 0.4s steps(4);
+}
+
+/* End of a street: the chips slide into the pot. */
+.tvBet[data-sweep='true'] {
+  left: 50%;
+  top: 50%;
+  opacity: 0;
+}
+
+/* Landscape phones and desktops: a wide oval. */
+@media (orientation: landscape) {
+  .tv {
+    --edge-x: 60px;
+    --edge-y: 50px;
+    width: 100%;
+    aspect-ratio: 16 / 9.5;
+  }
+
+  .tvFelt {
+    inset: 30px 34px;
+  }
+
+  .tvSeat {
+    left: calc(50% + var(--wx) * (50% - var(--edge-x)));
+    top: calc(50% + var(--wy) * (50% - var(--edge-y)));
+  }
+
+  .tvBet {
+    left: calc(50% + var(--wx) * (50% - var(--edge-x)) - var(--wbx));
+    top: calc(50% + var(--wy) * (50% - var(--edge-y)) - var(--wby));
+  }
+
+  .tvSeat {
+    width: 96px;
+  }
+
+  .tvCentre {
+    width: 36%;
+  }
+
+  .tvBoard .cardSlot {
+    width: 32px;
+    height: 45px;
+  }
+
+  .tv[data-cards='true'] .tvBoard .cardSlot {
+    width: 36px;
+    height: 50px;
+  }
+}
+
+/* Seven or more players: smaller seats so the middle of the table stays clear. */
+.tv[data-crowd='true'] .tvSeat {
+  width: 64px;
+}
+
+.tv[data-crowd='true'] .tvName {
+  font-size: 13px;
+}
+
+.tv[data-crowd='true'] .tvFace {
+  width: 36px;
+  height: 36px;
+}
+
+.tv[data-crowd='true'] .tvFace .face {
+  width: 22px;
+  height: 22px;
+}
+
+.muteBtn {
+  padding: 4px 8px;
+}
+
+
 
 .feed {
   display: grid;
@@ -752,6 +1289,7 @@ input {
   .feed li:nth-child(n + 2) {
     display: none;
   }
+
 }
 
 /* ---------- action dock ---------- */
@@ -851,6 +1389,120 @@ input {
 .waiting {
   padding: 8px 4px;
   font-size: 18px;
+}
+
+/* Turn-based dock */
+
+.hostLink {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 4px;
+}
+
+.hostLink .linkish {
+  font-size: 15px;
+}
+
+.dockSub {
+  font-size: 9px;
+  opacity: 0.8;
+}
+
+.dock[data-myturn='true'] {
+  box-shadow: 0 calc(var(--px) * -1) 0 0 var(--gold);
+}
+
+.dockTurn {
+  font-family: var(--display);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--gold);
+}
+
+.betPresets {
+  display: flex;
+  gap: 2px;
+}
+
+.betPresets .btn {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 36px;
+  padding: 4px 2px;
+  font-size: 8px;
+}
+
+.betPresets .btn[data-pressed='true'] {
+  --face: var(--gold);
+  --edge: var(--gold-dk);
+  --text: var(--ink);
+}
+
+.slider {
+  display: block;
+  padding: 0 8px;
+}
+
+.slider input {
+  display: block;
+  width: 100%;
+  height: 32px;
+  margin: 0;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+}
+
+.slider input::-webkit-slider-runnable-track {
+  height: 8px;
+  background: var(--ink);
+  box-shadow: inset 0 0 0 2px #4a4163;
+}
+
+.slider input::-webkit-slider-thumb {
+  width: 20px;
+  height: 24px;
+  margin-top: -8px;
+  appearance: none;
+  border: 0;
+  border-radius: 0;
+  background: var(--gold);
+  box-shadow: 0 0 0 var(--px) var(--ink);
+}
+
+.slider input::-moz-range-track {
+  height: 8px;
+  background: var(--ink);
+}
+
+.slider input::-moz-range-thumb {
+  width: 20px;
+  height: 24px;
+  border: var(--px) solid var(--ink);
+  border-radius: 0;
+  background: var(--gold);
+}
+
+.preActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  padding: 0 4px;
+}
+
+.preCheck {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  cursor: pointer;
+}
+
+.preCheck input {
+  width: 22px;
+  height: 22px;
+  margin: 0;
+  accent-color: var(--gold);
 }
 
 /* ---------- ledger ---------- */
@@ -1147,4 +1799,19 @@ input {
     animation: none !important;
     transition: none !important;
   }
+}
+
+/* ---------- dev table previews (/dev/table, development only) ---------- */
+
+.devTables {
+  display: grid;
+  gap: 32px;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 24px 16px 64px;
+}
+
+.devScene {
+  display: grid;
+  gap: 4px;
 }

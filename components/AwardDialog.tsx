@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Dialog from './Dialog';
 import { ChipStack, Face } from './Pixels';
 import { chips } from '@/lib/client';
-import { eligibleWinners, potOf } from '@/lib/game';
+import { awardingSidePot, eligibleWinners, potOf } from '@/lib/game';
 import type { Action, Party } from '@/lib/types';
 
 export default function AwardDialog({
@@ -21,7 +21,7 @@ export default function AwardDialog({
   const pot = potOf(party);
   const eligible = eligibleWinners(party);
   const [picked, setPicked] = useState<string[]>(eligible.length === 1 ? [eligible[0].id] : []);
-  const side = party.phase === 'showdown';
+  const side = awardingSidePot(party);
 
   if (pot === 0) {
     return (

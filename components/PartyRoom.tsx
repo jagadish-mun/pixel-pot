@@ -5,68 +5,14 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import ActionDock from './ActionDock';
 import AwardDialog from './AwardDialog';
 import Ledger from './Ledger';
-import { ChipFace, ChipStack, Face } from './Pixels';
+import { ChipFace, Speaker } from './Pixels';
 import { InviteDialog, TableMenu } from './TableMenu';
-import { api, chips, loadName, loadSeat, saveName, saveSeat, sendAction, signed, useParty, type Seat } from '@/lib/client';
-import { MAX_PLAYERS, NAME_MAX, eligibleWinners, potOf } from '@/lib/game';
-import type { Action, Party, Player } from '@/lib/types';
+import TableView from './TableView';
+import { api, blip, chips, loadMuted, loadName, loadSeat, saveMuted, saveName, saveSeat, useParty, type Seat } from '@/lib/client';
+import { NAME_MAX, eligibleWinners, legalActions, tableLine, usesTurns } from '@/lib/game';
+import type { Action, Party } from '@/lib/types';
 
 type Toast = { id: number; text: string; kind: 'ok' | 'error' };
-
-function SeatCard({ p, party, isMe }: { p: Player; party: Party; isMe: boolean }) {
-  const playing = party.phase !== 'idle';
-  const out = playing ? !p.inHand || p.folded : p.stack === 0;
-  let foot: React.ReactNode = null;
-  if (playing) {
-    if (!p.inHand) foot = <span className="dim">{p.stack === 0 ? 'Out of chips' : 'In next hand'}</span>;
-    else if (p.folded) foot = <span className="tag folded">Folded</span>;
-    else
-      foot = (
-        <>
-          {p.stack === 0 && <span className="tag allin">All in</span>}
-          {p.bet > 0 ? <span>{chips(p.bet)} in</span> : <span className="dim">Yet to bet</span>}
-        </>
-      );
-  } else if (p.stack === 0) {
-    foot = <span className="dim">Out of chips</span>;
-  } else if (p.lastDelta !== null && party.handNo > 0) {
-    foot = (
-      <span className={p.lastDelta > 0 ? 'up' : p.lastDelta < 0 ? 'down' : 'dim'}>
-        {p.lastDelta === 0 ? 'Even' : signed(p.lastDelta)} last hand
-      </span>
-    );
-  }
-  return (
-    <li className="seat" data-me={isMe} data-out={out}>
-      <Face seed={p.id + p.name} size={32} />
-      <div style={{ minWidth: 0 }}>
-        <div className="seatName">
-          <span>{p.name}</span>
-          {playing && party.dealerId === p.id && (
-            <span className="tag dealer" title="Dealer button">
-              D
-            </span>
-          )}
-          {playing && party.sbId === p.id && (
-            <span className="tag blind" title="Small blind">
-              SB
-            </span>
-          )}
-          {playing && party.bbId === p.id && (
-            <span className="tag blind" title="Big blind">
-              BB
-            </span>
-          )}
-        </div>
-        <div className="seatStack">{chips(p.stack)}</div>
-      </div>
-      <div className="seatFoot">
-        <span className="seatStatus">{foot}</span>
-        {playing && <ChipStack amount={p.bet} scale={2} maxColumns={3} maxPerColumn={4} />}
-      </div>
-    </li>
-  );
-}
 
 function JoinDock({
   party,
@@ -80,7 +26,7 @@ function JoinDock({
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => setName(loadName()), []);
-  const full = party.players.length >= MAX_PLAYERS;
+  const full = party.players.length >= party.settings.maxPlayers;
 
   const join = async (e: FormEvent) => {
     e.preventDefault();
@@ -126,13 +72,16 @@ function JoinDock({
 }
 
 export default function PartyRoom({ code }: { code: string }) {
-  const { party, sync, needsDatabase, apply } = useParty(code);
   const [seat, setSeat] = useState<Seat | null>(null);
+  const { party, myCards, sync, needsDatabase, apply, send } = useParty(code, seat);
   const [ready, setReady] = useState(false);
   const [tab, setTab] = useState<'table' | 'log'>('table');
   const [dialog, setDialog] = useState<null | 'invite' | 'menu' | 'award'>(null);
   const [toast, setToast] = useState<Toast | null>(null);
   const [busy, setBusy] = useState(false);
+  const [muted, setMuted] = useState(false);
+  const mutedRef = useRef(false);
+  mutedRef.current = muted;
   const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const notify = useCallback((text: string, kind: 'ok' | 'error' = 'ok') => {
@@ -149,6 +98,7 @@ export default function PartyRoom({ code }: { code: string }) {
       window.history.replaceState(null, '', window.location.pathname);
     }
     setSeat(loadSeat(code));
+    setMuted(loadMuted());
     setReady(true);
     return () => clearTimeout(toastTimer.current);
   }, [code]);
@@ -157,17 +107,78 @@ export default function PartyRoom({ code }: { code: string }) {
     async (action: Action): Promise<boolean> => {
       if (!seat) return false;
       setBusy(true);
-      const res = await sendAction(code, seat, action);
+      const res = await send(seat, action);
       setBusy(false);
-      if (res.party) {
-        apply(res.party);
-        return true;
-      }
+      if (res.party) return true;
       notify(res.error ?? 'Try again.', 'error');
       return false;
     },
-    [apply, code, notify, seat],
+    [notify, send, seat],
   );
+
+  // Serverless means no background timers: once a turn's time is up, every seated player's
+  // browser asks the server once to apply the timeout. The server ignores it if time is left.
+  const deadline = party?.phase === 'live' ? party.turnDeadline : null;
+  const sentFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!seat || !deadline || sentFor.current === deadline) return;
+    const t = setTimeout(async () => {
+      sentFor.current = deadline;
+      await send(seat, { type: 'timeout' });
+    }, Math.max(0, deadline + 750 - Date.now()));
+    return () => clearTimeout(t);
+  }, [deadline, seat, send]);
+
+  // Computer players move when a human's browser asks, once their "thinking" time is up.
+  // Sent once per thinking deadline; several browsers sending at once is fine (only one move applies).
+  const botActAt = party?.phase === 'live' ? party.botActAt : null;
+  const botSentFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!seat || !botActAt || botSentFor.current === botActAt) return;
+    let tries = 0;
+    let t: ReturnType<typeof setTimeout>;
+    const step = async () => {
+      botSentFor.current = botActAt;
+      const res = await send(seat, { type: 'bot_step' });
+      // Our clock may be a little ahead of the server's: try again shortly, a couple of times.
+      if (!res.party && res.status === 400 && ++tries < 3) t = setTimeout(step, 700);
+    };
+    t = setTimeout(step, Math.max(0, botActAt + 100 - Date.now()));
+    return () => clearTimeout(t);
+  }, [botActAt, seat, send]);
+
+  // Auto-deal (one human at a card table): the host's browser starts the next hand when it's due.
+  const nextHandAt = party?.phase === 'idle' && party.hostId === seat?.playerId ? party.nextHandAt : null;
+  const dealtFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (!nextHandAt || dealtFor.current === nextHandAt) return;
+    const t = setTimeout(() => {
+      dealtFor.current = nextHandAt;
+      void act({ type: 'start_hand' });
+    }, Math.max(0, nextHandAt - Date.now()));
+    return () => clearTimeout(t);
+  }, [act, nextHandAt]);
+
+  // When it becomes my turn: buzz, blip and flag the tab title.
+  const myTurn = Boolean(party && seat && legalActions(party, seat.playerId).fold);
+  useEffect(() => {
+    const base = `Table ${code} | Pixel Pot`;
+    if (!myTurn) {
+      document.title = base;
+      return;
+    }
+    document.title = '● Your turn · Pixel Pot';
+    navigator.vibrate?.(80);
+    if (!mutedRef.current) blip();
+    // Phones: bring my seat, cards and the dock into view (the dock is sticky, so the bottom shows them all).
+    if (window.matchMedia('(max-width: 899px)').matches) {
+      const smooth = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+    }
+    return () => {
+      document.title = base;
+    };
+  }, [code, myTurn]);
 
   if (sync === 'missing') {
     return (
@@ -198,22 +209,25 @@ export default function PartyRoom({ code }: { code: string }) {
   const me = party.players.find((p) => p.id === seat?.playerId) ?? null;
   const isHost = Boolean(me && me.id === party.hostId);
   const host = party.players.find((p) => p.id === party.hostId);
-  const pot = potOf(party);
   const playing = party.phase !== 'idle';
   const lobby = !playing && party.handNo === 0;
   const feed = party.feed.slice(-3).reverse();
-  const { smallBlind, bigBlind } = party.settings;
-  // Between hands the felt shows how the last hand ended.
-  const lastHand = [...party.log].reverse().find((e) => e.kind === 'hand');
-  const shownPot = playing ? pot : lastHand?.kind === 'hand' ? lastHand.pot : 0;
-  let lastResult = 'Deal the next hand';
-  if (!playing && lastHand?.kind === 'hand') {
-    const names = lastHand.rows.filter((r) => lastHand.winners.includes(r.id)).map((r) => r.name);
-    if (names.length === 1) lastResult = `went to ${names[0]}`;
-    else if (names.length > 1) lastResult = `went to ${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
-    else lastResult = 'pot last hand';
+
+  // The banner says whose turn it is. Free-play tables have no turns, so no banner.
+  let banner: { text: string; mine: boolean } | null = null;
+  if (usesTurns(party) && party.phase === 'live') {
+    const dealer = party.players.find((p) => p.id === party.dealerId);
+    const acting = party.players.find((p) => p.id === party.toActId);
+    if (party.awaitingDeal) {
+      const mine = Boolean(me && (me.id === party.dealerId || isHost));
+      banner = { mine, text: mine ? `Deal the ${party.awaitingDeal}` : `Waiting for ${dealer?.name ?? 'the dealer'} to deal the ${party.awaitingDeal}…` };
+    } else if (myTurn) banner = { mine: true, text: 'Your turn' };
+    else if (acting) banner = { mine: false, text: `Waiting for ${acting.name}…` };
+  } else if (usesTurns(party) && party.phase === 'showdown') {
+    banner = { mine: isHost, text: isHost ? 'Showdown: award the pot' : `Showdown · ${host?.name ?? 'the host'} awards the pot` };
   }
-  const showAward = isHost && (party.phase === 'showdown' || (dialog === 'award' && playing));
+  // Card mode works out the winner itself, so the host never awards by hand.
+  const showAward = party.settings.mode !== 'cards' && isHost && (party.phase === 'showdown' || (dialog === 'award' && playing));
 
   return (
     <div className="room" data-tab={tab}>
@@ -223,6 +237,18 @@ export default function PartyRoom({ code }: { code: string }) {
           <span>Pixel Pot</span>
         </Link>
         <span className="syncDot" data-sync={sync} role="status" aria-label={sync === 'offline' ? 'Reconnecting' : 'Live'} />
+        <button
+          className="btn small quiet muteBtn"
+          aria-pressed={muted}
+          aria-label="Mute turn sound"
+          title={muted ? 'Turn sound on' : 'Turn sound off'}
+          onClick={() => {
+            saveMuted(!muted);
+            setMuted(!muted);
+          }}
+        >
+          <Speaker muted={muted} />
+        </button>
         <button className="btn small quiet codeTag" onClick={() => setDialog('invite')} aria-label={`Table code ${code}. Invite players`}>
           <b>{code}</b>
         </button>
@@ -249,51 +275,47 @@ export default function PartyRoom({ code }: { code: string }) {
 
       <main className="panes">
         <section className="tablePane" aria-label="Table">
-          <div className="felt">
-            <div className="feltHead">
-              <span>{playing ? `Hand ${party.handNo}` : lobby ? 'Lobby' : `After hand ${party.handNo}`}</span>
-              <span>{bigBlind > 0 ? `Blinds ${chips(smallBlind)}/${chips(bigBlind)}` : 'No blinds'}</span>
-            </div>
+          {banner && (
+            <p className="turnBanner" data-mine={banner.mine} role="status" aria-live="polite">
+              {banner.text}
+            </p>
+          )}
+          <div className="feltHead">
+            <span>{playing ? `Hand ${party.handNo}` : lobby ? 'Lobby' : `After hand ${party.handNo}`}</span>
+            <span className="feltGame">
+              {tableLine(party.settings)
+                .split(' · ')
+                .map((part) => (
+                  <span key={part}>{part}</span>
+                ))}
+            </span>
+          </div>
 
-            {lobby ? (
+          <TableView
+            party={party}
+            meId={me?.id ?? null}
+            myCards={me ? myCards : null}
+            busy={busy}
+            act={me ? act : undefined}
+            lobby={
               <div className="lobby">
                 <p className="potLabel">Table code</p>
                 <p className="lobbyCode" aria-label={code.split('').join(' ')}>
                   {code}
                 </p>
-                <p style={{ maxWidth: '32ch' }}>
-                  {isHost
-                    ? 'Read the code out, or send the link. Start the first hand when everyone has sat down.'
-                    : `${host?.name ?? 'The host'} starts the first hand when everyone has sat down.`}
+                <p style={{ maxWidth: '24ch' }}>
+                  {!isHost
+                    ? `${host?.name ?? 'The host'} starts when everyone is in.`
+                    : party.players.length > 1 && party.players.every((p) => p.bot || p.id === party.hostId)
+                      ? 'Your AI opponents are ready. Start when you are.'
+                      : 'Start the first hand when everyone has sat down.'}
                 </p>
                 <button className="btn small" onClick={() => setDialog('invite')}>
                   Invite players
                 </button>
               </div>
-            ) : (
-              <div className="pot" aria-live="polite">
-                {playing && (
-                  <div className="potPile">
-                    <ChipStack amount={pot} scale={3} maxColumns={4} maxPerColumn={8} />
-                  </div>
-                )}
-                <div className="potText">
-                  <p className="potAmount" key={shownPot} data-bump={playing && pot > 0}>
-                    {chips(shownPot)}
-                  </p>
-                  <p className="potLabel">
-                    {party.phase === 'showdown' ? 'left in the side pot' : playing ? 'in the pot' : lastResult}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <ul className="seats">
-              {party.players.map((p) => (
-                <SeatCard key={p.id} p={p} party={party} isMe={p.id === me?.id} />
-              ))}
-            </ul>
-          </div>
+            }
+          />
 
           <ol className="feed" aria-label="Latest moves">
             {feed.map((f) => (

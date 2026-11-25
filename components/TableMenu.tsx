@@ -3,8 +3,10 @@
 import { useState, type FormEvent } from 'react';
 import Dialog from './Dialog';
 import { Face } from './Pixels';
+import { Choice, SettingsFields, fromDraft, toDraft, type Draft } from './SettingsFields';
 import { chips, copyText, type Seat } from '@/lib/client';
-import type { Action, Party, Player } from '@/lib/types';
+import { gameName } from '@/lib/game';
+import type { Action, BotLevel, Party, Player, Settings } from '@/lib/types';
 
 export function InviteDialog({
   code,
@@ -102,6 +104,31 @@ function PlayerTools({
   );
 }
 
+function SettingsList({ s }: { s: Settings }) {
+  const rows: [string, string][] = [
+    ['Game', `${s.mode === 'cards' ? 'Cards' : 'Cardless'} · ${gameName(s)}`],
+    ['Blinds', s.bigBlind > 0 ? `${chips(s.smallBlind)}/${chips(s.bigBlind)}` : 'None'],
+    ['Ante', s.ante > 0 ? chips(s.ante) : 'None'],
+    ['Starting chips', chips(s.startingChips)],
+    ['Turns', s.mode === 'cards' || s.turnOrder ? 'Take turns' : 'Anytime'],
+    ['Action timer', s.actionTimer > 0 ? `${s.actionTimer}s` : 'Off'],
+    ['Max players', String(s.maxPlayers)],
+  ];
+  return (
+    <>
+      <h3 className="sectionTitle">Table settings</h3>
+      <dl className="settingsList">
+        {rows.map(([k, v]) => (
+          <div key={k}>
+            <dt className="dim">{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </>
+  );
+}
+
 export function TableMenu({
   party,
   seat,
@@ -123,17 +150,18 @@ export function TableMenu({
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const [sb, setSb] = useState(String(party.settings.smallBlind));
-  const [bb, setBb] = useState(String(party.settings.bigBlind));
-  const [start, setStart] = useState(String(party.settings.startingChips));
+  const [draft, setDraft] = useState<Draft>(() => toDraft(party.settings));
+  const [botLevel, setBotLevel] = useState<BotLevel>('medium');
+  const cards = party.settings.mode === 'cards';
+  const full = party.players.length >= party.settings.maxPlayers;
   const locked = party.phase !== 'idle';
 
   const saveSettings = async (e: FormEvent) => {
     e.preventDefault();
-    const ok = await act({
-      type: 'settings',
-      settings: { startingChips: Number(start), smallBlind: Number(sb || 0), bigBlind: Number(bb || 0) },
-    });
+    // Mode is fixed when the table is created, so it isn't sent.
+    const settings: Partial<Settings> = fromDraft(draft);
+    delete settings.mode;
+    const ok = await act({ type: 'settings', settings });
     if (ok) notify('Table settings saved');
   };
 
@@ -162,11 +190,13 @@ export function TableMenu({
         </div>
       )}
 
+      {!isHost && <SettingsList s={party.settings} />}
+
       {isHost && (
         <>
           {locked && (
             <div className="formError">
-              <p>Stacks, players and blinds can be changed between hands.</p>
+              <p>Stacks, players and settings can be changed between hands.</p>
               <button
                 className="linkish"
                 style={{ color: '#ffd9d4' }}
@@ -187,7 +217,7 @@ export function TableMenu({
               <li key={p.id}>
                 <Face seed={p.id + p.name} size={28} />
                 <span>
-                  {p.name} <span className="dim">has {chips(p.stack)}</span>
+                  {p.name} {p.bot && <span className="tag botTag">AI</span>} <span className="dim">has {chips(p.stack)}</span>
                 </span>
                 <button className="btn small quiet" aria-expanded={open === p.id} onClick={() => setOpen(open === p.id ? null : p.id)}>
                   {open === p.id ? 'Done' : 'Edit'}
@@ -197,22 +227,42 @@ export function TableMenu({
             ))}
           </ul>
 
-          <h3 className="sectionTitle">Blinds and buy-in</h3>
+          {cards && (
+            <>
+              <h3 className="sectionTitle">AI players</h3>
+              <Choice
+                label="AI level"
+                value={botLevel}
+                onChange={setBotLevel}
+                disabled={locked || busy}
+                options={[
+                  { value: 'easy', label: 'Easy' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'hard', label: 'Hard' },
+                ]}
+              />
+              <button className="btn" disabled={locked || busy || full} onClick={() => act({ type: 'add_bot', level: botLevel })}>
+                {full ? 'The table is full' : 'Add AI player'}
+              </button>
+              <p className="dim">Remove an AI player from its Edit button above.</p>
+              <button
+                className="btn quiet"
+                aria-pressed={party.settings.autoDeal}
+                disabled={busy}
+                onClick={() => act({ type: 'auto_deal', on: !party.settings.autoDeal })}
+              >
+                {party.settings.autoDeal ? 'Pause auto-deal' : 'Deal hands automatically'}
+              </button>
+              <p className="dim">With only one person at the table, the next hand starts 3 seconds after the last.</p>
+            </>
+          )}
+
+          <h3 className="sectionTitle">Table settings</h3>
           <form onSubmit={saveSettings} style={{ display: 'grid', gap: 12 }}>
-            <div className="row split">
-              <label className="field">
-                <span>Small blind</span>
-                <input className="input num" inputMode="numeric" value={sb} onChange={(e) => setSb(e.target.value.replace(/\D/g, ''))} />
-              </label>
-              <label className="field">
-                <span>Big blind</span>
-                <input className="input num" inputMode="numeric" value={bb} onChange={(e) => setBb(e.target.value.replace(/\D/g, ''))} />
-              </label>
-            </div>
-            <label className="field">
-              <span>Starting chips for new players</span>
-              <input className="input num" inputMode="numeric" value={start} onChange={(e) => setStart(e.target.value.replace(/\D/g, ''))} />
-            </label>
+            <p>
+              {party.settings.mode === 'cards' ? 'Cards' : 'Cardless'} <span className="dim">(set when the table opened)</span>
+            </p>
+            <SettingsFields draft={draft} onChange={(patch) => setDraft((d) => ({ ...d, ...patch }))} disabled={locked || busy} />
             <button className="btn" disabled={locked || busy}>
               Save settings
             </button>

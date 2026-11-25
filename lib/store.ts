@@ -1,4 +1,5 @@
 import { Redis } from '@upstash/redis';
+import { normalizeRecord } from './game';
 import type { PartyRecord } from './types';
 
 /**
@@ -33,6 +34,11 @@ export interface Store {
   update(code: string, change: (rec: PartyRecord) => void): Promise<PartyRecord | null>;
 }
 
+/** Tables saved before a field existed get its default, so old tables keep working. */
+function normalize(rec: PartyRecord): PartyRecord {
+  return normalizeRecord(rec);
+}
+
 function bump(rec: PartyRecord) {
   rec.party.version += 1;
   rec.party.updatedAt = Date.now();
@@ -61,7 +67,7 @@ function memoryStore(): Store {
     },
     async get(code) {
       const entry = read(code);
-      return entry ? structuredClone(entry.rec) : null;
+      return entry ? normalize(structuredClone(entry.rec)) : null;
     },
     async create(rec) {
       if (read(rec.party.code)) return false;
@@ -71,7 +77,7 @@ function memoryStore(): Store {
     async update(code, change) {
       const entry = read(code);
       if (!entry) return null;
-      const next = structuredClone(entry.rec);
+      const next = normalize(structuredClone(entry.rec));
       change(next);
       bump(next);
       write(next);
@@ -99,7 +105,7 @@ function redisStore(): Store {
 
   const get = async (code: string): Promise<PartyRecord | null> => {
     const raw = await redis.get<string>(dataKey(code));
-    return raw ? (JSON.parse(raw) as PartyRecord) : null;
+    return raw ? normalize(JSON.parse(raw) as PartyRecord) : null;
   };
 
   return {

@@ -1,5 +1,5 @@
 import { joinParty, normalizeCode } from '@/lib/game';
-import { fail, handle, newId, newToken, partyBody, readJson } from '@/lib/server';
+import { fail, handle, newId, newToken, readJson, viewBody } from '@/lib/server';
 import { store } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +13,6 @@ export async function POST(req: Request, ctx: { params: Promise<{ code: string }
     const token = newToken();
     const rec = await store.update(code, (r) => joinParty(r, playerId, token, body.name, Date.now()));
     if (!rec) return fail('No table with that code. Check it with your host.', 404);
-    return partyBody(rec.party, { playerId, token });
+    return viewBody(rec, playerId, { playerId, token });
   });
 }

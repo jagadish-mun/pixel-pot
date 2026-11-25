@@ -1,0 +1,313 @@
+{
+ "idle": {
+  "party": {
+   "code": "OLD1",
+   "hostId": "Mia",
+   "version": 1,
+   "createdAt": 1700000000000,
+   "updatedAt": 1700000000000,
+   "settings": {
+    "startingChips": 1000,
+    "smallBlind": 5,
+    "bigBlind": 10
+   },
+   "players": [
+    {
+     "id": "Mia",
+     "name": "Mia",
+     "stack": 1000,
+     "buyIn": 1000,
+     "bet": 0,
+     "inHand": false,
+     "folded": false,
+     "undo": [],
+     "lastDelta": 0
+    },
+    {
+     "id": "Raj",
+     "name": "Raj",
+     "stack": 955,
+     "buyIn": 1000,
+     "bet": 0,
+     "inHand": false,
+     "folded": false,
+     "undo": [],
+     "lastDelta": -45
+    },
+    {
+     "id": "Lee",
+     "name": "Lee",
+     "stack": 1045,
+     "buyIn": 1000,
+     "bet": 0,
+     "inHand": false,
+     "folded": false,
+     "undo": [],
+     "lastDelta": 45
+    }
+   ],
+   "phase": "idle",
+   "handNo": 1,
+   "dealerId": "Mia",
+   "prevDealerId": null,
+   "sbId": null,
+   "bbId": null,
+   "handStart": {},
+   "won": {},
+   "potAtShowdown": 90,
+   "log": [
+    {
+     "kind": "hand",
+     "n": 1,
+     "ts": 1700000000000,
+     "pot": 90,
+     "winners": [
+      "Lee"
+     ],
+     "rows": [
+      {
+       "id": "Mia",
+       "name": "Mia",
+       "before": 1000,
+       "after": 1000
+      },
+      {
+       "id": "Raj",
+       "name": "Raj",
+       "before": 1000,
+       "after": 955
+      },
+      {
+       "id": "Lee",
+       "name": "Lee",
+       "before": 1000,
+       "after": 1045
+      }
+     ]
+    }
+   ],
+   "feed": [
+    {
+     "id": 1,
+     "ts": 1700000000000,
+     "kind": "info",
+     "text": "Mia opened the table"
+    },
+    {
+     "id": 2,
+     "ts": 1700000000000,
+     "kind": "info",
+     "text": "Raj sat down with 1,000"
+    },
+    {
+     "id": 3,
+     "ts": 1700000000000,
+     "kind": "info",
+     "text": "Lee sat down with 1,000"
+    },
+    {
+     "id": 4,
+     "ts": 1700000000000,
+     "kind": "info",
+     "text": "Hand 1 started. Mia has the button"
+    },
+    {
+     "id": 5,
+     "ts": 1700000000000,
+     "kind": "bet",
+     "text": "Raj raises to 45"
+    },
+    {
+     "id": 6,
+     "ts": 1700000000000,
+     "kind": "bet",
+     "text": "Lee calls 35"
+    },
+    {
+     "id": 7,
+     "ts": 1700000000000,
+     "kind": "fold",
+     "text": "Mia folds"
+    },
+    {
+     "id": 8,
+     "ts": 1700000000000,
+     "kind": "win",
+     "text": "Lee wins 90"
+    }
+   ],
+   "feedSeq": 8
+  },
+  "tokens": {
+   "Mia": "tok-Mia",
+   "Raj": "tok-Raj",
+   "Lee": "tok-Lee"
+  }
+ },
+ "live": {
+  "party": {
+   "code": "OLD2",
+   "hostId": "Mia",
+   "version": 1,
+   "createdAt": 1700000000000,
+   "updatedAt": 1700000000000,
+   "settings": {
+    "startingChips": 1000,
+    "smallBlind": 5,
+    "bigBlind": 10
+   },
+   "players": [
+    {
+     "id": "Mia",
+     "name": "Mia",
+     "stack": 990,
+     "buyIn": 1000,
+     "bet": 10,
+     "inHand": true,
+     "folded": false,
+     "undo": [],
+     "lastDelta": 0
+    },
+    {
+     "id": "Raj",
+     "name": "Raj",
+     "stack": 955,
+     "buyIn": 1000,
+     "bet": 0,
+     "inHand": true,
+     "folded": false,
+     "undo": [],
+     "lastDelta": -45
+    },
+    {
+     "id": "Lee",
+     "name": "Lee",
+     "stack": 1010,
+     "buyIn": 1000,
+     "bet": 35,
+     "inHand": true,
+     "folded": false,
+     "undo": [
+      {
+       "t": "bet",
+       "amount": 30
+      }
+     ],
+     "lastDelta": 45
+    }
+   ],
+   "phase": "live",
+   "handNo": 2,
+   "dealerId": "Raj",
+   "prevDealerId": "Mia",
+   "sbId": "Lee",
+   "bbId": "Mia",
+   "handStart": {
+    "Mia": 1000,
+    "Raj": 955,
+    "Lee": 1045
+   },
+   "won": {},
+   "potAtShowdown": 0,
+   "log": [
+    {
+     "kind": "hand",
+     "n": 1,
+     "ts": 1700000000000,
+     "pot": 90,
+     "winners": [
+      "Lee"
+     ],
+     "rows": [
+      {
+       "id": "Mia",
+       "name": "Mia",
+       "before": 1000,
+       "after": 1000
+      },
+      {
+       "id": "Raj",
+       "name": "Raj",
+       "before": 1000,
+       "after": 955
+      },
+      {
+       "id": "Lee",
+       "name": "Lee",
+       "before": 1000,
+       "after": 1045
+      }
+     ]
+    }
+   ],
+   "feed": [
+    {
+     "id": 1,
+     "ts": 1700000000000,
+     "kind": "info",
+     "text": "Mia opened the table"
+    },
+    {
+     "id": 2,
+     "ts": 1700000000000,
+     "kind": "info",
+     "text": "Raj sat down with 1,000"
+    },
+    {
+     "id": 3,
+     "ts": 1700000000000,
+     "kind": "info",
+     "text": "Lee sat down with 1,000"
+    },
+    {
+     "id": 4,
+     "ts": 1700000000000,
+     "kind": "info",
+     "text": "Hand 1 started. Mia has the button"
+    },
+    {
+     "id": 5,
+     "ts": 1700000000000,
+     "kind": "bet",
+     "text": "Raj raises to 45"
+    },
+    {
+     "id": 6,
+     "ts": 1700000000000,
+     "kind": "bet",
+     "text": "Lee calls 35"
+    },
+    {
+     "id": 7,
+     "ts": 1700000000000,
+     "kind": "fold",
+     "text": "Mia folds"
+    },
+    {
+     "id": 8,
+     "ts": 1700000000000,
+     "kind": "win",
+     "text": "Lee wins 90"
+    },
+    {
+     "id": 9,
+     "ts": 1700000001000,
+     "kind": "info",
+     "text": "Hand 2 started. Raj has the button"
+    },
+    {
+     "id": 10,
+     "ts": 1700000001000,
+     "kind": "bet",
+     "text": "Lee raises to 35"
+    }
+   ],
+   "feedSeq": 10
+  },
+  "tokens": {
+   "Mia": "tok-Mia",
+   "Raj": "tok-Raj",
+   "Lee": "tok-Lee"
+  }
+ }
+}
