@@ -72,9 +72,10 @@ describe('wealth', () => {
         }),
       );
     }
-    expect(wealthTarget(0, 1000, 60)).toBe(0);
-    expect(wealthTarget(1, 1_000_000, 60)).toBe(4);
-    expect(wealthTarget(1000, 1000, 60)).toBe(60);
+    expect(wealthTarget(0, 1000, WEALTH.opponent)).toBe(0);
+    expect(wealthTarget(1, 1_000_000, WEALTH.opponent)).toBe(2);
+    expect(wealthTarget(1000, 1000, WEALTH.opponent)).toBe(12);
+    expect(wealthTarget(1000, 1000, WEALTH.me)).toBe(16);
   });
 });
 

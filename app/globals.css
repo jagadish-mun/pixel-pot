@@ -862,8 +862,8 @@ select.input {
   }
 }
 
-/* The game and the last three moves, top left, one line each. */
-/* The game and the last five moves, top left, on a dark see-through panel. */
+/* The game and the last five moves, top left, over the scene (the camera never moves for it): a light
+   see-through panel, so a name plate underneath still shows through. */
 .hud {
   position: absolute;
   top: var(--banner-room);
@@ -873,8 +873,7 @@ select.input {
   gap: 4px;
   max-width: 40%;
   padding: 6px 10px 8px;
-  background: rgba(12, 9, 22, 0.62);
-  box-shadow: 0 0 0 2px rgba(12, 9, 22, 0.35);
+  background: rgba(12, 9, 22, 0.38);
   pointer-events: none;
   text-shadow: 1px 1px 0 var(--ink);
 }
@@ -1277,12 +1276,12 @@ select.input {
   height: 100%;
 }
 
-/* Chip totals beside each stack and bet. */
+/* Chip totals beside each stack and bet: level with the pile's middle, a clear gap from its chips. */
 .chipLabel {
   position: absolute;
   z-index: 1;
-  padding-left: 2px;
-  transform: translateY(-100%);
+  padding-left: 4px;
+  transform: translateY(-50%);
   font-family: var(--display);
   font-size: 8px;
   line-height: 1.4;
@@ -1303,8 +1302,8 @@ select.input {
 }
 
 .chipLabel[data-me='true'] {
-  padding: 0 2px 0 0;
-  transform: translate(-100%, -100%);
+  padding: 0 5px 0 0;
+  transform: translate(-100%, -50%);
   font-size: 10px;
   color: var(--gold);
 }

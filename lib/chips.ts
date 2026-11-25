@@ -59,7 +59,10 @@ export function chipBreakdown(amount: number, targetCount?: number): { chips: { 
   return { chips, remainder: rest };
 }
 
-export const WEALTH = { min: 4, opponent: 60, me: 70, bet: 30 };
+/** Chip counts: from `min` for the poorest to the richest at the table; bets and the pot at most `bet`. */
+export const WEALTH = { min: 2, opponent: 12, me: 16, bet: 8 };
+/** Chips a tower: stacks, and bets or the pot. */
+export const PER_TOWER = { stack: 6, bet: 4 };
 
 /**
  * How many chips a pile should have so piles show relative wealth: from `min`

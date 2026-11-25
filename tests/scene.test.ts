@@ -90,6 +90,21 @@ describe('projection', () => {
   });
 });
 
+describe('centring', () => {
+  it('puts the table centre in the middle of the screen at any size', () => {
+    for (const [w, h] of [
+      [480, 640],
+      [562, 700],
+      [507, 330],
+      [480, 208],
+      [845, 400],
+    ]) {
+      const c = fitCamera(w, h, { top: 20, side: 6, bottom: 30 });
+      expect(Math.abs(project(c, 0, 0, 0).x - w / 2)).toBeLessThanOrEqual(1);
+    }
+  });
+});
+
 describe('poseOf', () => {
   const party = (phase: 'idle' | 'live' | 'showdown') => ({ phase }) as Parameters<typeof poseOf>[0];
   const player = (p: Partial<Parameters<typeof poseOf>[1]>) => ({ stack: 500, inHand: true, folded: false, ...p }) as Parameters<typeof poseOf>[1];

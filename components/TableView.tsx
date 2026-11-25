@@ -2,13 +2,13 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { BADGE_MS, applyPending, clatter, overlayFor, type AnimView } from './scene/animate';
-import { DEAL_MS, FOLD_MS, SWEEP_MS, drawScene, handsBox, personAt, seatAnchors, type Marker, type Motion, type SceneData } from './scene/draw';
+import { DEAL_MS, FOLD_MS, SWEEP_MS, drawScene, handsBox, peopleBoxes, personAt, seatAnchors, type Marker, type Motion, type SceneData } from './scene/draw';
 import { AnimQueue, diffSnapshots } from './scene/events';
 import { handsSize, myCardWidth } from './scene/hands';
 import { BET_INSET, BOARD_Z, POT_SPOT, arrangeSeats, onFelt, spots } from './scene/layout';
 import { idle, poseOf } from './scene/people';
 import { fitCamera, project, type Camera } from './scene/project';
-import { WEALTH, chipTowers, wealthTarget } from '@/lib/chips';
+import { WEALTH, wealthTarget } from '@/lib/chips';
 import { chips, loadMuted, signed } from '@/lib/client';
 import { cardText, type Card } from '@/lib/cards';
 import { potOf, potsOf, usesTurns } from '@/lib/game';
@@ -140,6 +140,7 @@ export default function TableView({
 }) {
   const box = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const handsCanvas = useRef<HTMLCanvasElement>(null);
   const size = useCanvasSize(box);
   const still = useReducedMotion();
   const turns = usesTurns(party);
@@ -152,30 +153,12 @@ export default function TableView({
   // My hands, first person, need room at the bottom; on tall screens there's a strip below the rail too.
   const cw = size ? myCardWidth(size.w, size.q) : 0;
   const handsH = me ? handsSize(cw, holeCount).h : 0;
-  // A panel floating over the scene's top-left corner (the recent moves on wide screens) is kept clear of.
-  const [overlay, setOverlay] = useState(0);
-  useLayoutEffect(() => {
-    const scene = box.current;
-    const panel = scene?.closest('.stage')?.querySelector<HTMLElement>('.hud');
-    if (!scene || !panel) return;
-    const measure = () => {
-      const s = scene.getBoundingClientRect();
-      const p = panel.getBoundingClientRect();
-      const overlaps = p.bottom > s.top + 4 && p.left < s.left + s.width / 2 && getComputedStyle(panel).display !== 'none';
-      setOverlay(overlaps ? Math.round(p.right - s.left + 8) : 0);
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(panel);
-    ro.observe(scene);
-    return () => ro.disconnect();
-  }, []);
   const cam: Camera | null = useMemo(() => {
     if (!size) return null;
     const strip = size.h > size.w * 1.05 ? MY_STRIP / size.q : 0;
     const bottom = Math.max(MARGIN.bottom / size.q, strip, handsH * 0.55);
-    return fitCamera(size.w, size.h, { top: MARGIN.top / size.q, side: MARGIN.side / size.q, bottom, left: overlay / size.q });
-  }, [size, handsH, overlay]);
+    return fitCamera(size.w, size.h, { top: MARGIN.top / size.q, side: MARGIN.side / size.q, bottom });
+  }, [size, handsH]);
 
   // I sit at the near side. Spectators see the table from the host's chair.
   let meIndex = party.players.findIndex((p) => p.id === meId);
@@ -237,8 +220,9 @@ export default function TableView({
   // My chips sit on the felt just above my hands, between them and the middle.
   const myZ = useMemo(() => {
     if (!cam || !hands || !size) return -0.42;
-    // Room for the "You have: …" pill (about 30 CSS px) between the chips and my hands.
-    const top = cam.h - handsH - 3 - 30 / size.q;
+    // Room for the "You have: …" pill (about 30 CSS px) between the chips and my hands, plus the pile's front row
+    // (its towers' bases reach below the pile's middle).
+    const top = cam.h - handsH - 3 - 30 / size.q - Math.round(0.04 * project(cam, 0, 0, -0.3).s * 0.5);
     for (let z = -0.5; z < -0.1; z += 0.01) if (project(cam, 0, 0, z).y <= top) return z;
     return -0.1;
   }, [cam, hands, handsH, size]);
@@ -251,15 +235,6 @@ export default function TableView({
   const maxChips = (max: number) => Math.round(WEALTH.min + (max - WEALTH.min) * chipScale);
   const markersOf = (p: Player): Marker[] =>
     playing ? ([party.dealerId === p.id && 'D', party.sbId === p.id && 'SB', party.bbId === p.id && 'BB'].filter(Boolean) as Marker[]) : party.dealerId === p.id ? ['D'] : [];
-
-  // My towers stay below the board: as many chips a tower (up to 15) as fit between my chips' spot and the board's near edge.
-  const myPerTower = useMemo(() => {
-    if (!cam) return 15;
-    const base = project(cam, 0, 0, myZ);
-    const boardNear = project(cam, 0, 0, BOARD_Z - 0.115).y;
-    const th = Math.max(2, Math.round(0.026 * base.s) >= 8 ? 3 : 2);
-    return Math.max(3, Math.min(15, Math.floor((base.y - boardNear - 6) / th) - 1));
-  }, [cam, myZ]);
 
   const data: SceneData = {
     seats: seats.map(({ player: p, seat, me: mine }) => {
@@ -289,7 +264,6 @@ export default function TableView({
     dealerSeat: seats.find((s) => s.player.id === party.dealerId)?.seat ?? null,
     hands,
     myZ,
-    myPerTower,
   };
 
   /* ---------- motion: cards dealt in, bets slid into the pot, folds tossed, shown cards turned over ---------- */
@@ -386,7 +360,7 @@ export default function TableView({
     badges.current = badges.current.filter((b) => now - b.start < BADGE_MS);
     const view: AnimView = { playing, pending: queue.current.pending(), badges: badges.current };
     const shownData = applyPending({ ...d, pot: Math.max(0, d.pot - sliding) }, view);
-    drawScene(ctx, c, shownData, m, now, moving ? (seed) => idle(seed, now) : () => STILL, overlayFor(ctx, c, shownData, view, now));
+    drawScene(ctx, c, shownData, m, now, moving ? (seed) => idle(seed, now) : () => STILL, overlayFor(ctx, c, shownData, view, now), handsCanvas.current?.getContext('2d'));
     // /dev/table shows how long frames take.
     const stats = (window as { __sceneStats?: number[] }).__sceneStats;
     if (stats) stats.push(performance.now() - started);
@@ -431,6 +405,7 @@ export default function TableView({
     ) : null;
 
   // Where each seat's labels go, in CSS pixels.
+  const people = cam ? peopleBoxes(cam, seats) : [];
   const anchors = cam
     ? seats.map(({ player: p, seat, me: isMe }) => {
         const bet = inFront(party, p);
@@ -438,7 +413,7 @@ export default function TableView({
           cam,
           { seat, me: isMe, stack: p.stack, bet, stackChips: wealthTarget(p.stack, richest, maxChips(isMe ? WEALTH.me : WEALTH.opponent)), betChips: wealthTarget(bet, richest, maxChips(WEALTH.bet)) },
           myZ,
-          myPerTower,
+          people,
         );
         const x = Math.min(Math.max(a.head.x * q, PLATE_HALF), cam.w * q - PLATE_HALF);
         return { ...a, plate: { x, y: a.head.y * q, lift: 0 }, stackAt: { x: a.stack.x * q, y: a.stack.bottom * q } };
@@ -448,6 +423,21 @@ export default function TableView({
   const crowded = anchors.some((a, i) =>
     anchors.some((b, j) => i > 0 && j > 0 && i !== j && Math.abs(a.stackAt.x - b.stackAt.x) < 52 && Math.abs(a.stackAt.y - b.stackAt.y) < 22),
   );
+  // A chip label that would cover anyone's chips isn't drawn by the pile: a stack's total moves to the plate, a bet's is
+  // left to the plate's move tag ("Call 10"). Boxes in CSS pixels; the display font is about one em a character.
+  const piles = anchors.flatMap((a, i) => {
+    const { player: p } = seats[i];
+    const box = (e: { left: number; right: number; top: number; bottom: number }) => ({ i, left: e.left * q, right: e.right * q, top: e.top * q, bottom: e.bottom * q });
+    return [...(p.stack > 0 ? [box(a.stack)] : []), ...(inFront(party, seats[i].player) > 0 ? [box(a.bet)] : [])];
+  });
+  const labelClashes = (i: number, pile: { left: number; right: number; top: number; bottom: number }, text: string, onLeft: boolean, em: number) => {
+    const w = text.length * em + 6;
+    const mid = ((pile.top + pile.bottom) / 2) * q;
+    const box = onLeft ? { left: pile.left * q - w, right: pile.left * q } : { left: pile.right * q, right: pile.right * q + w };
+    return piles.some((o) => box.left < o.right && o.left < box.right && mid - em < o.bottom && o.top < mid + em && !(o.i === i && o.left === pile.left * q));
+  };
+  const stackClash = anchors.map((a, i) => !seats[i].me && labelClashes(i, a.stack, chips(seats[i].player.stack), false, 8));
+  const betClash = anchors.map((a, i) => labelClashes(i, a.bet, chips(inFront(party, seats[i].player)), false, 8));
   // Name plates that would overlap a neighbour's are lifted, a plate's height at a time, into the room above.
   const PLATE = { w: crowded ? 62 : 76, h: crowded ? 40 : 30 };
   const placed: { x: number; y: number }[] = [];
@@ -472,7 +462,11 @@ export default function TableView({
   return (
     <div className="scene" ref={box} data-cards={cardsMode}>
       {size && (
-        <canvas ref={canvas} className="sceneCanvas" width={size.w} height={size.h} style={{ width: size.w * q, height: size.h * q }} aria-hidden="true" />
+        <>
+          <canvas ref={canvas} className="sceneCanvas" width={size.w} height={size.h} style={{ width: size.w * q, height: size.h * q }} aria-hidden="true" />
+          {/* My hands and cards: their own layer at twice the resolution, for finer cards. */}
+          <canvas ref={handsCanvas} className="sceneCanvas" width={size.w * 2} height={size.h * 2} style={{ width: size.w * q, height: size.h * q }} aria-hidden="true" />
+        </>
       )}
       {cam && (
         <>
@@ -481,9 +475,8 @@ export default function TableView({
               const bet = inFront(party, p);
               const a = anchors[k];
               const acting = p.id === actingId;
-              const stackOnPlate = crowded && !isMe;
+              const stackOnPlate = (crowded || stackClash[k]) && !isMe;
               const shown = isMe ? null : shownOf(p);
-              const { undrawn } = chipTowers(p.stack);
               return (
                 <li key={p.id} className="seatGroup" aria-label={seatLabel(party, p, acting, shown)}>
                   {!isMe && (
@@ -499,13 +492,12 @@ export default function TableView({
                   />
                   )}
                   {p.stack > 0 && !stackOnPlate && (
-                    <span className="chipLabel" data-me={isMe} style={at(isMe ? a.stack.left : a.stack.right, a.stack.bottom)} aria-hidden="true">
+                    <span className="chipLabel" data-me={isMe} style={at(isMe ? a.stack.left : a.stack.right, (a.stack.top + a.stack.bottom) / 2)} aria-hidden="true">
                       {chips(p.stack)}
-                      {undrawn > 0 && <small>+{chips(undrawn)}</small>}
                     </span>
                   )}
-                  {bet > 0 && (isMe || !crowded) && (
-                    <span className="chipLabel bet" style={at(a.bet.right, a.bet.bottom)} aria-hidden="true">
+                  {bet > 0 && (isMe || !crowded) && !betClash[k] && (
+                    <span className="chipLabel bet" style={at(a.bet.right, (a.bet.top + a.bet.bottom) / 2)} aria-hidden="true">
                       {chips(bet)}
                     </span>
                   )}

@@ -13,7 +13,7 @@ import {
   drawFlatCard,
   handsBox,
   personAt,
-  shownLayout,
+  shownSpots,
   type SceneData,
   type SceneSeat,
 } from './draw';
@@ -137,7 +137,7 @@ function puff(ctx: Ctx, cam: Camera, at: Vec, t: number) {
 
 /** Cards in flight from a player's hands to the felt: lift, flip face up in the air, land with a bounce. */
 function drawThrow(ctx: Ctx, cam: Camera, data: SceneData, s: SceneSeat, cards: Card[], t: number) {
-  const land = shownLayout(s.seat, s.me, data.myZ, s.id, cards);
+  const land = shownSpots(cam, data, s, cards);
   const from = s.me ? MY_HANDS : handsPoint(s);
   if (t < 0.3) {
     // Lifting in the hands (opponents): drawn by the person's pose; mine rise with my hands.
@@ -157,7 +157,8 @@ function drawThrow(ctx: Ctx, cam: Camera, data: SceneData, s: SceneSeat, cards: 
           }
         : { ...c.at, y: 0.012 * Math.abs(Math.sin(settle * Math.PI * 1.5)) * (1 - settle) };
     const size = s.me && t < 0.8 ? { w: lerp(BOARD_CARD.w * 1.6, c.size.w, travel), d: lerp(BOARD_CARD.d * 1.6, c.size.d, travel) } : c.size;
-    drawFlatCard(ctx, cam, c.card, at, size, { turn, rot: c.rot * travel });
+    // In flight it's a plain flipping card; it lands as the flat sprite, glyphs whole.
+    drawFlatCard(ctx, cam, c.card, at, size, { turn: t < 0.8 ? Math.min(0.99, turn) : 1 });
   }
   if (t >= 0.8 && t < 0.87) for (const c of land) puff(ctx, cam, c.at, (t - 0.8) / 0.07);
 }

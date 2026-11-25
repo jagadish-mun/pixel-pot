@@ -3,13 +3,12 @@
  * pixels (a scanline fill, no anti-aliasing), so it stays crisp pixel art when
  * the canvas is scaled up.
  */
-import { chipFaceRows, chipTowers, denom } from '../../lib/chips';
+import { PER_TOWER, WEALTH, chipFaceRows, chipTowers, denom } from '../../lib/chips';
 import type { Card } from '@/lib/cards';
-import { BONE, INK, LETTERS, cardMarks, offscreen, stamp } from './glyphs';
+import { BONE, GLYPHS, INK, LETTERS, SUITS, offscreen, stamp, suitColor } from './glyphs';
 import { handsSize, handsSprite, type HandsMode } from './hands';
 import { BOARD_Z, BET_INSET, POT_SPOT, STACK_INSET, myShowSpot, onFelt, railPoint, spots, type SeatSpot } from './layout';
-import { hashText } from '../../lib/bot';
-import { RAIL_Y, personSprite, spriteSize, type Pose } from './people';
+import { personSprite, spriteMetrics, type Pose } from './people';
 import { PERSON_H, RAIL_H, RAIL_W, TABLE_R, project, stadium, stadiumAt, stadiumLength, type Camera, type Vec } from './project';
 
 type Ctx = CanvasRenderingContext2D;
@@ -115,101 +114,141 @@ function feltPattern(ctx: Ctx): CanvasPattern | string {
   return p;
 }
 
-const backs = new WeakMap<Ctx, CanvasPattern>();
-
-/** The red lattice on card backs. */
-function backPattern(ctx: Ctx): CanvasPattern | string {
-  const cached = backs.get(ctx);
-  if (cached) return cached;
-  if (typeof document === 'undefined') return '#e2483d';
-  const tile = document.createElement('canvas');
-  tile.width = 2;
-  tile.height = 2;
-  const t = tile.getContext('2d')!;
-  t.fillStyle = '#e2483d';
-  t.fillRect(0, 0, 2, 2);
-  t.fillStyle = '#9c2a2a';
-  t.fillRect(0, 0, 1, 1);
-  t.fillRect(1, 1, 1, 1);
-  const p = ctx.createPattern(tile, 'repeat')!;
-  backs.set(ctx, p);
-  return p;
-}
-
 /* ---------------------------------- cards --------------------------------- */
 
 export const BOARD_CARD = { w: 0.156, d: 0.22, gap: 0.016 };
 
+/** A card lying flat, seen from the chairs: a wide, short card, 0.6× as tall as it is wide. */
+const FLAT_H = 0.6;
+const EDGE = '#c9bea6';
+
+const flatSprites = new Map<string, HTMLCanvasElement | null>();
+
 /**
- * A card lying flat at (x, y, z), `w` across and `d` deep: a cream trapezoid
- * with a dark outline, in perspective. Its marks (corner index, big suit) are
- * stamped on unsquashed inside it, so they stay readable however flat it lies.
- * `turn` 0→1 flips it over (back, then face).
+ * A hand-drawn card lying on the felt, `w` pixels wide: an ink outline, the
+ * cream face, a darker bottom row for its thickness and a soft shadow. Face up,
+ * the rank and suit sit big and side by side in the middle (whole-number glyph
+ * scale, never squashed), with a small index top-left when there's room.
+ * 'slot' is an empty place's faint outline.
  */
+export function flatCardSprite(card: Card | 'back' | 'slot', w: number): HTMLCanvasElement | null {
+  w = Math.max(8, Math.round(w));
+  const h = Math.max(6, Math.round(w * FLAT_H));
+  const key = `${card}|${w}`;
+  if (flatSprites.has(key)) return flatSprites.get(key)!;
+  if (flatSprites.size > 300) flatSprites.clear();
+  const c = offscreen(w + 1, h + 2);
+  if (c) {
+    const t = c.getContext('2d')!;
+    if (card === 'slot') {
+      t.globalAlpha = 0.35;
+      t.fillStyle = '#dff5e9';
+      t.fillRect(0, 0, w, 1);
+      t.fillRect(0, h - 1, w, 1);
+      t.fillRect(0, 0, 1, h);
+      t.fillRect(w - 1, 0, 1, h);
+    } else {
+      // Shadow, outline, face, then the edge showing the card's thickness.
+      t.globalAlpha = 0.35;
+      t.fillStyle = INK;
+      t.fillRect(1, 2, w, h);
+      t.globalAlpha = 1;
+      t.fillRect(0, 0, w, h);
+      t.fillStyle = BONE;
+      t.fillRect(1, 1, w - 2, h - 3);
+      t.fillStyle = EDGE;
+      t.fillRect(1, h - 2, w - 2, 1);
+      if (card === 'back') {
+        t.fillStyle = '#e2483d';
+        t.fillRect(2, 2, w - 4, h - 5);
+        t.fillStyle = '#9c2a2a';
+        for (let y = 2; y < h - 3; y++) for (let x = 2 + (y % 2); x < w - 2; x += 2) t.fillRect(x, y, 1, 1);
+      } else {
+        const color = suitColor(card);
+        const rank = GLYPHS[card[0]];
+        const suit = SUITS[card[1]];
+        const rw = rank[0].length;
+        const face = { w: w - 2, h: h - 3 };
+        const s = Math.max(1, Math.min(Math.floor((face.w - 4) / (rw + 6)), Math.floor((face.h - 2) / 7)));
+        const bw = (rw + 1 + 5) * s;
+        const bx = 1 + Math.floor((face.w - bw) / 2);
+        const by = 1 + Math.floor((face.h - 7 * s) / 2);
+        // The small index, only where it stays clear of the big marks.
+        if (bx >= 2 + rw + 2 || by >= 2 + 7 + 1) stamp(t, rank, 2, 2, color);
+        stamp(t, rank, bx, by, color, s);
+        stamp(t, suit, bx + (rw + 1) * s, by, color, s);
+      }
+    }
+  }
+  flatSprites.set(key, c);
+  return c;
+}
+
+/** A flat card's screen width (whole pixels) for a width `w` on the table at (x, y, z). */
+function flatWidth(cam: Camera, w: number, at: { x: number; y: number; z: number }): number {
+  return Math.round(Math.abs(project(cam, at.x + w / 2, at.y, at.z).x - project(cam, at.x - w / 2, at.y, at.z).x));
+}
+
+/** The gold edge of a winning card, round a screen box; `glow` fades a second, wider ring. */
+function winEdge(ctx: Ctx, x: number, y: number, w: number, h: number, glow: number) {
+  const ring = (d: number, size: number) => {
+    ctx.fillRect(x - d, y - d, w + 2 * d, size);
+    ctx.fillRect(x - d, y + h + d - size, w + 2 * d, size);
+    ctx.fillRect(x - d, y - d, size, h + 2 * d);
+    ctx.fillRect(x + w + d - size, y - d, size, h + 2 * d);
+  };
+  ctx.fillStyle = GOLD;
+  ring(1, 1);
+  if (glow) {
+    ctx.globalAlpha = glow;
+    ring(2, 2);
+    ctx.globalAlpha = glow * 0.4;
+    ring(4, 2);
+    ctx.globalAlpha = 1;
+  }
+}
+
+/** A flat card centred on a screen point, `w` pixels wide. `turn` < 1 is mid-flip: a narrowing plain card, no marks. */
+export function drawCardAt(ctx: Ctx, card: Card | 'back', cx: number, cy: number, w: number, opts: { turn?: number; win?: boolean; glow?: number } = {}) {
+  const turn = opts.turn ?? 1;
+  const h = Math.max(6, Math.round(w * FLAT_H));
+  const x = Math.round(cx - w / 2);
+  const y = Math.round(cy - h / 2);
+  if (turn >= 1 || card === 'back') {
+    const sprite = flatCardSprite(card === 'back' || turn < 0.5 ? 'back' : card, w);
+    if (sprite) ctx.drawImage(sprite, x, y);
+  } else {
+    // Mid-flip: narrower by the turn, plain (glyphs are never squashed), back then a blank face.
+    const fw = Math.max(2, Math.round(w * Math.abs(Math.cos(turn * Math.PI))));
+    const fx = Math.round(cx - fw / 2);
+    ctx.fillStyle = INK;
+    ctx.fillRect(fx, y, fw, h);
+    ctx.fillStyle = turn < 0.5 ? '#e2483d' : BONE;
+    if (fw > 2) ctx.fillRect(fx + 1, y + 1, fw - 2, h - 2);
+  }
+  if (opts.win) winEdge(ctx, x, y, Math.round(w), h, opts.glow ?? 0);
+}
+
+/** A card lying flat at (x, y, z) on the table, `size.w` across: the flat sprite at that depth's width. */
 export function drawFlatCard(
   ctx: Ctx,
   cam: Camera,
   card: Card | 'back',
   at: { x: number; y: number; z: number },
   size: { w: number; d: number },
-  opts: { turn?: number; outline?: string; shadow?: boolean; rot?: number; glow?: number } = {},
+  opts: { turn?: number; win?: boolean; glow?: number; scale?: number } = {},
 ) {
-  const turn = opts.turn ?? 1;
-  const hw = (size.w / 2) * Math.max(0.08, Math.abs(Math.cos(turn * Math.PI)));
-  const cos = Math.cos(opts.rot ?? 0);
-  const sin = Math.sin(opts.rot ?? 0);
-  const corners = (y: number, grow: number): Pt[] =>
-    [
-      [-1, 1],
-      [1, 1],
-      [1, -1],
-      [-1, -1],
-    ].map(([sx, sz]) => {
-      // Turned a little on the felt (thrown cards), round the card's middle.
-      const dx = sx * (hw + grow);
-      const dz = sz * (size.d / 2 + grow);
-      return project(cam, at.x + dx * cos - dz * sin, y, at.z + dx * sin + dz * cos);
-    });
-  if (opts.shadow !== false) {
-    ctx.globalAlpha = 0.35;
-    fillPolys(ctx, [corners(0, 0.008).map((p) => ({ x: p.x + 1, y: p.y + 2 }))], INK);
-    ctx.globalAlpha = 1;
-  }
-  const face = corners(at.y, 0);
-  fillPolys(ctx, [corners(at.y, 0.006)], INK);
-  fillPolys(ctx, [face], BONE);
-  if (turn < 0.5 || card === 'back') {
-    fillPolys(ctx, [corners(at.y, -Math.min(0.012, hw * 0.25))], backPattern(ctx));
-  } else {
-    // An upright box for the marks, measured at the card's mid-height (its sides slant with perspective).
-    const [fl, fr, nr, nl] = face;
-    const box = { x: Math.ceil((fl.x + nl.x) / 2), y: Math.ceil(fl.y), w: 0, h: 0 };
-    box.w = Math.floor((fr.x + nr.x) / 2) - box.x;
-    box.h = Math.floor(nl.y) - box.y;
-    if (box.w >= 6 && box.h >= 8) cardMarks(ctx, card, box, box.w >= 30 && box.h >= 36 ? 2 : 1);
-  }
-  if (opts.outline) plotLine(ctx, corners(at.y, 0.01), opts.outline, true);
-  // The winning hand glowing: a thick, fading gold edge.
-  if (opts.glow) {
-    ctx.globalAlpha = opts.glow;
-    plotLine(ctx, corners(at.y, 0.014), GOLD, true, 2);
-    ctx.globalAlpha = opts.glow * 0.4;
-    plotLine(ctx, corners(at.y, 0.026), GOLD, true, 2);
-    ctx.globalAlpha = 1;
-  }
+  const p = project(cam, at.x, at.y, at.z);
+  drawCardAt(ctx, card, p.x, p.y, Math.round(flatWidth(cam, size.w, at) * (opts.scale ?? 1)), opts);
 }
 
-/** An empty board slot: a faint outline on the felt. */
-function drawSlot(ctx: Ctx, cam: Camera, x: number, z: number) {
-  const pts = [
-    [-1, 1],
-    [1, 1],
-    [1, -1],
-    [-1, -1],
-  ].map(([sx, sz]) => project(cam, x + (sx * BOARD_CARD.w) / 2, 0, z + (sz * BOARD_CARD.d) / 2));
-  ctx.globalAlpha = 0.35;
-  plotLine(ctx, pts, '#dff5e9', true);
-  ctx.globalAlpha = 1;
+/** The board's five places on screen: the same size, an even gap, centred on the table. */
+export function boardSlots(cam: Camera): { cx: number; cy: number; w: number }[] {
+  const mid = project(cam, 0, 0, BOARD_Z);
+  const w = flatWidth(cam, BOARD_CARD.w, { x: 0, y: 0, z: BOARD_Z });
+  const gap = Math.max(2, Math.round(w * 0.1));
+  const left = Math.round(mid.x - (5 * w + 4 * gap) / 2);
+  return Array.from({ length: 5 }, (_, i) => ({ cx: left + i * (w + gap) + w / 2, cy: Math.round(mid.y), w }));
 }
 
 export const boardSlotX = (i: number) => (i - 2) * (BOARD_CARD.w + BOARD_CARD.gap);
@@ -307,8 +346,21 @@ function chipShape(cam: Camera, x: number, z: number) {
  * Towers for a pile, placed on the felt round `at`: biggest values in the back
  * row, `cols` towers a row, back to front.
  */
-function pileLayout(amount: number, at: Vec, target: number | undefined, cols: number, perTower = 15) {
-  const { towers, undrawn } = chipTowers(amount, { target, perTower });
+/** How a pile is stacked: towers across, chips a tower, and the most chips drawn (any more show only in the label). */
+export interface PileShape {
+  cols: number;
+  perTower: number;
+  max: number;
+}
+export const PILES = {
+  stack: { cols: 3, perTower: PER_TOWER.stack, max: WEALTH.opponent },
+  myStack: { cols: 4, perTower: PER_TOWER.stack, max: WEALTH.me },
+  bet: { cols: 2, perTower: PER_TOWER.bet, max: WEALTH.bet },
+} satisfies Record<string, PileShape>;
+
+function pileLayout(amount: number, at: Vec, target: number | undefined, pile: PileShape) {
+  const { cols, perTower } = pile;
+  const { towers, undrawn } = chipTowers(amount, { target: target === undefined ? undefined : Math.min(target, pile.max), perTower, maxChips: pile.max });
   const n = towers.length;
   const perRow = Math.max(1, Math.min(n, cols));
   const rows = Math.ceil(n / perRow);
@@ -323,8 +375,8 @@ function pileLayout(amount: number, at: Vec, target: number | undefined, cols: n
   return { placed, undrawn, rows, perRow, step };
 }
 
-export function drawChips(ctx: Ctx, cam: Camera, amount: number, at: Vec, target: number | undefined, cols = 3, perTower = 15) {
-  const { placed } = pileLayout(amount, at, target, cols, perTower);
+export function drawChips(ctx: Ctx, cam: Camera, amount: number, at: Vec, target: number | undefined, pile: PileShape = PILES.bet) {
+  const { placed } = pileLayout(amount, at, target, pile);
   placed.sort((a, b) => b.z - a.z);
   for (const p of placed) {
     const shape = chipShape(cam, p.x, p.z);
@@ -355,10 +407,9 @@ export function chipsExtent(
   amount: number,
   at: Vec,
   target?: number,
-  cols = 3,
-  perTower = 15,
+  pile: PileShape = PILES.bet,
 ): { x: number; top: number; bottom: number; left: number; right: number } {
-  const { placed } = pileLayout(amount, at, target, cols, perTower);
+  const { placed } = pileLayout(amount, at, target, pile);
   if (!placed.length) {
     const p = project(cam, at.x, 0, at.z);
     return { x: p.x, top: p.y, bottom: p.y, left: p.x, right: p.x };
@@ -377,6 +428,29 @@ export function chipsExtent(
   return { x: (left + right) / 2, top, bottom, left, right };
 }
 
+export type Box = { left: number; right: number; top: number; bottom: number };
+export const overlaps = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+
+/**
+ * Where a pile actually goes: its spot, unless it would cover a person (their
+ * body, face or forearms). Then it slides further onto the felt, a step at a
+ * time, and if it still touches, its towers get shorter.
+ */
+export function placePile(cam: Camera, amount: number, at: Vec, target: number | undefined, pile: PileShape, seat: SeatSpot, people: Box[]): { at: Vec; pile: PileShape } {
+  const clear = (spot: Vec, shape: PileShape) => !people.some((b) => overlaps(chipsExtent(cam, amount, spot, target, shape), b));
+  if (amount <= 0 || clear(at, pile)) return { at, pile };
+  for (const shape of [pile, { ...pile, perTower: Math.max(2, Math.ceil(pile.perTower / 2)), cols: pile.cols + 1 }]) {
+    for (let step = 1; step <= 8; step++) {
+      const spot = { x: at.x - seat.nx * 0.025 * step, z: at.z - seat.nz * 0.025 * step };
+      if (clear(spot, shape)) return { at: spot, pile: shape };
+    }
+  }
+  return { at, pile };
+}
+
+/** The boxes piles must keep clear of: every opponent, from the head to the forearms. */
+export const peopleBoxes = (cam: Camera, seats: { seat: SeatSpot; me: boolean }[]): Box[] => seats.filter((s) => !s.me).map((s) => personBounds(cam, s.seat));
+
 /* ------------------------------ table markers ------------------------------ */
 
 const MARKERS = {
@@ -391,10 +465,13 @@ function drawMarker(ctx: Ctx, cam: Camera, kind: Marker, at: Vec) {
   const m = MARKERS[kind];
   const base = project(cam, at.x, 0, at.z);
   const r = kind === 'D' ? 0.032 : 0.028;
-  const rx = Math.max(4, Math.round(r * base.s));
+  const letters = [...m.text];
+  const w = letters.length * 4 - 1;
+  // Never smaller than its letters (3×5 each, 1 apart) plus a pixel of face all round.
+  const rx = Math.max(Math.ceil(w / 2) + 2, Math.round(r * base.s));
   const back = project(cam, at.x, 0, at.z + r);
   const front = project(cam, at.x, 0, at.z - r);
-  const ry = Math.max(2, Math.round((front.y - back.y) / 2));
+  const ry = Math.max(4, Math.round((front.y - back.y) / 2));
   const x = Math.round(base.x);
   const y = Math.round(base.y);
   const th = 3;
@@ -410,8 +487,6 @@ function drawMarker(ctx: Ctx, cam: Camera, kind: Marker, at: Vec) {
   ctx.fillRect(x - rx, y - th, 2 * rx, th);
   fillEllipse(ctx, x, y - th, rx, ry, m.face);
   // Letters, upright and unsquashed, centred on the top.
-  const letters = [...m.text];
-  const w = letters.length * 4 - 1;
   letters.forEach((l, k) => stamp(ctx, LETTERS[l], x - Math.floor(w / 2) + k * 4, y - th - 2, m.ink));
 }
 
@@ -482,6 +557,15 @@ export function personAt(cam: Camera, seat: SeatSpot): { x: number; y: number; h
 }
 
 /** Which way a seat's person turns: toward the middle at the rounded ends. */
+/** The screen box a seated person covers above the table: from the top of the head to the forearms on the rail. */
+export function personBounds(cam: Camera, seat: SeatSpot): Box {
+  const at = personAt(cam, seat);
+  const { k, w, railY } = spriteMetrics(at.height);
+  const left = Math.round(at.x - w / 2);
+  const top = Math.round(at.y - railY);
+  return { left, right: left + w, top: top + k, bottom: Math.round(at.y) + 2 * k };
+}
+
 const turnOf = (seat: SeatSpot): -1 | 0 | 1 => (seat.nx < -0.45 ? 1 : seat.nx > 0.45 ? -1 : 0);
 
 /* ---------------------------------- scene --------------------------------- */
@@ -521,7 +605,6 @@ export interface SceneData {
   hands: { mode: HandsMode; cards: Card[]; count: number; cw: number } | null;
   /** Where my chips sit (the felt between my hands and the middle), and how tall my towers may be there. */
   myZ: number;
-  myPerTower: number;
   /** 0–1: the winning cards glowing after a showdown. */
   glow?: number;
   /** My hands pushed or raised by an animation (pixels; negative is up). */
@@ -586,9 +669,15 @@ export function drawScene(
   now: number,
   idleOf: (seed: string) => { bob: number; blink: boolean; tilt: boolean },
   overlay?: { felt: () => void; top: () => void; shake: { x: number; y: number } },
+  /** My hands' own layer, at twice the scene's resolution (drawn on the scene itself without one). */
+  handsLayer?: Ctx | null,
 ) {
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, cam.w, cam.h);
+  if (handsLayer) {
+    handsLayer.imageSmoothingEnabled = false;
+    handsLayer.clearRect(0, 0, cam.w * 2, cam.h * 2);
+  }
   ctx.save();
   // A tiny screen shake (an all-in).
   if (overlay) ctx.translate(overlay.shake.x, overlay.shake.y);
@@ -600,9 +689,9 @@ export function drawScene(
       const at = personAt(cam, s.seat);
       const look = idleOf(s.seed);
       const sprite = personSprite({ seed: s.seed, robot: s.robot, pose: s.pose, cards: s.held, blink: look.blink, tilt: look.tilt, turn: turnOf(s.seat), height: at.height });
-      const { w } = spriteSize(at.height);
+      const { w, railY } = spriteMetrics(at.height);
       const x = Math.round(at.x - w / 2);
-      const y = Math.round(at.y - (RAIL_Y / 62) * at.height);
+      const y = Math.round(at.y - railY);
       return { s, sprite, x, y, bob: s.pose === 'out' ? 0 : look.bob, z: railPoint(s.seat).z };
     })
     .sort((a, b) => b.z - a.z);
@@ -632,39 +721,43 @@ export function drawScene(
   // 4. Everything on the felt, back to front.
   const items: { z: number; draw: () => void }[] = [];
   const onTop: (() => void)[] = [];
+  const slots = boardSlots(cam);
   data.board.forEach((card, i) => {
-    const x = boardSlotX(i);
+    const slot = slots[i];
     const started = motion.dealt.get(i);
     const t = started === undefined ? 1 : Math.min(1, (now - started) / DEAL_MS);
+    const empty = () => {
+      const sprite = flatCardSprite('slot', slot.w);
+      if (sprite) ctx.drawImage(sprite, Math.round(slot.cx - slot.w / 2), Math.round(slot.cy - (slot.w * FLAT_H) / 2));
+    };
     if (!card || t <= 0) {
-      items.push({ z: BOARD_Z, draw: () => drawSlot(ctx, cam, x, BOARD_Z) });
+      items.push({ z: BOARD_Z, draw: empty });
       return;
     }
     if (t < 1 && data.dealerSeat) {
-      // Slides in from the dealer for the first 60%, then flips over.
-      const from = onFelt(data.dealerSeat, 0.05);
+      // Slides in from the dealer for the first 60% (lifting a little on the way), then flips over.
+      const from = project(cam, onFelt(data.dealerSeat, 0.05).x, 0, onFelt(data.dealerSeat, 0.05).z);
       const slide = ease(Math.min(1, t / 0.6));
-      const at = { x: from.x + (x - from.x) * slide, y: 0.06 * Math.sin(slide * Math.PI), z: from.z + (BOARD_Z - from.z) * slide };
       const turn = card === 'back' ? 0 : Math.max(0, (t - 0.6) / 0.4);
-      items.push({ z: BOARD_Z, draw: () => drawSlot(ctx, cam, x, BOARD_Z) });
-      onTop.push(() => drawFlatCard(ctx, cam, card === 'back' ? 'back' : card, at, BOARD_CARD, { turn }));
+      items.push({ z: BOARD_Z, draw: empty });
+      onTop.push(() =>
+        drawCardAt(ctx, card === 'back' ? 'back' : card, from.x + (slot.cx - from.x) * slide, from.y + (slot.cy - from.y) * slide - 6 * Math.sin(slide * Math.PI), slot.w, { turn }),
+      );
       return;
     }
     const win = card !== 'back' && data.winning.has(card);
-    items.push({
-      z: BOARD_Z,
-      draw: () => drawFlatCard(ctx, cam, card, { x, y: 0, z: BOARD_Z }, BOARD_CARD, { outline: win ? GOLD : undefined, glow: win ? (data.glow ?? 0) : 0 }),
-    });
+    items.push({ z: BOARD_Z, draw: () => drawCardAt(ctx, card, slot.cx, slot.cy, slot.w, { win, glow: win ? (data.glow ?? 0) : 0 }) });
   });
 
+  const clearOf = peopleBoxes(cam, data.seats);
   for (const s of data.seats) {
-    const { stack: stackAt, bet: betAt } = spots(s.seat, s.me, data.myZ);
-    const cols = s.me ? 5 : 3;
-    const perTower = s.me ? data.myPerTower : 15;
-    if (s.stack > 0) items.push({ z: stackAt.z, draw: () => drawChips(ctx, cam, s.stack, stackAt, s.stackChips, cols, perTower) });
+    const spot = spots(s.seat, s.me, data.myZ);
+    const stack = placePile(cam, s.stack, spot.stack, s.stackChips, s.me ? PILES.myStack : PILES.stack, s.seat, clearOf);
+    if (s.stack > 0) items.push({ z: stack.at.z, draw: () => drawChips(ctx, cam, s.stack, stack.at, s.stackChips, stack.pile) });
     // Chips an animation is moving are drawn by it, not here.
     const betShown = s.bet - (data.moving?.get(s.id) ?? 0);
-    if (betShown > 0) items.push({ z: betAt.z, draw: () => drawChips(ctx, cam, betShown, betAt, s.betChips) });
+    const bet = placePile(cam, betShown, spot.bet, s.betChips, PILES.bet, s.seat, clearOf);
+    if (betShown > 0) items.push({ z: bet.at.z, draw: () => drawChips(ctx, cam, betShown, bet.at, s.betChips, bet.pile) });
     s.markers.forEach((m, k) => {
       const at = markerSpot(s.seat, s.me, data.myZ, k);
       items.push({ z: at.z, draw: () => drawMarker(ctx, cam, m, at) });
@@ -672,11 +765,11 @@ export function drawScene(
     // Shown cards, face up on the felt where they were thrown (the bets are in the pot by showdown).
     if (s.shown) {
       const glow = data.glow ?? 0;
-      for (const c of shownLayout(s.seat, s.me, data.myZ, s.id, s.shown)) {
+      for (const c of shownSpots(cam, data, s, s.shown)) {
         const win = data.winning.has(c.card);
         items.push({
           z: c.at.z,
-          draw: () => drawFlatCard(ctx, cam, c.card, c.at, c.size, { rot: c.rot, outline: win ? GOLD : undefined, glow: win ? glow : 0 }),
+          draw: () => drawFlatCard(ctx, cam, c.card, c.at, c.size, { win, glow: win ? glow : 0 }),
         });
       }
     }
@@ -710,8 +803,21 @@ export function drawScene(
     const box = handsBox(cam, data.hands);
     // Resting hands lie on the near rail.
     const rail = project(cam, 0, RAIL_H, -TABLE_R + RAIL_W / 2).y;
-    const sprite = handsSprite({ ...data.hands, restAt: Math.round(rail - box.y) });
-    if (sprite) ctx.drawImage(sprite, box.x, box.y + Math.round(data.handsLift ?? 0));
+    const lift = Math.round(data.handsLift ?? 0);
+    if (handsLayer) {
+      // Painted at 2×: the box's bottom-centre lines up with the scene's.
+      const sprite = handsSprite({ ...data.hands, cw: data.hands.cw * 2, restAt: Math.round(2 * (rail - box.y)) });
+      const shake = overlay?.shake ?? { x: 0, y: 0 };
+      if (sprite)
+        handsLayer.drawImage(
+          sprite,
+          Math.round(2 * (box.x + shake.x) + (2 * box.w - sprite.width) / 2),
+          2 * (box.y + box.h + lift + shake.y) - sprite.height,
+        );
+    } else {
+      const sprite = handsSprite({ ...data.hands, restAt: Math.round(rail - box.y) });
+      if (sprite) ctx.drawImage(sprite, box.x, box.y + lift);
+    }
   }
 
   // Badges and anything else over the whole scene.
@@ -719,17 +825,57 @@ export function drawScene(
   ctx.restore();
 }
 
-/** A seat's face-up cards on the felt: where each lies, its size, and a slight turn as if thrown down. */
-export function shownLayout(seat: SeatSpot, me: boolean, myZ: number, id: string, cards: Card[]) {
-  const spot = me ? myShowSpot(myZ) : onFelt(seat, BET_INSET - 0.07);
+/** A seat's face-up cards on the felt: where each lies and its size (upright: glyphs are never rotated). */
+export function shownLayout(seat: SeatSpot, me: boolean, myZ: number, cards: Card[]) {
+  // In from the stack: further at the rounded ends (cards there spread toward the stack), less along the far side (the board).
+  const spot = me ? myShowSpot(myZ) : onFelt(seat, BET_INSET - 0.07 + 0.1 * Math.abs(seat.nx));
   const n = cards.length;
   const w = n > 2 ? SHOWN_CARD.w * 0.8 : SHOWN_CARD.w;
   return cards.map((card, k) => ({
     card,
     at: { x: spot.x + (k - (n - 1) / 2) * (w + 0.01), y: 0, z: spot.z },
     size: { w, d: SHOWN_CARD.d },
-    rot: (((hashText(id + card) % 15) - 7) * Math.PI) / 180,
   }));
+}
+
+/**
+ * Where a seat's shown cards land on screen: their spot, moved toward the
+ * table's middle until they're clear of that seat's chips.
+ */
+export function shownSpots(cam: Camera, data: SceneData, s: SceneSeat, cards: Card[]) {
+  const layout = shownLayout(s.seat, s.me, data.myZ, cards);
+  if (s.stack <= 0 || s.me) return layout;
+  const stack = placePile(cam, s.stack, spots(s.seat, s.me, data.myZ).stack, s.stackChips, PILES.stack, s.seat, peopleBoxes(cam, data.seats));
+  const pile = chipsExtent(cam, s.stack, stack.at, s.stackChips, stack.pile);
+  const box = (c: (typeof layout)[number], dx: number, dz: number): Box => {
+    const at = { x: c.at.x + dx, y: 0, z: c.at.z + dz };
+    const p = project(cam, at.x, 0, at.z);
+    const w = flatWidth(cam, c.size.w, at);
+    const h = Math.round(w * FLAT_H);
+    return { left: p.x - w / 2 - 1, right: p.x + w / 2 + 2, top: p.y - h / 2 - 1, bottom: p.y + h / 2 + 2 };
+  };
+  // The board and the people are off limits too.
+  const slots = boardSlots(cam);
+  const sh = Math.round(slots[0].w * FLAT_H);
+  const board: Box = { left: slots[0].cx - slots[0].w / 2 - 2, right: slots[4].cx + slots[4].w / 2 + 2, top: slots[0].cy - sh / 2 - 2, bottom: slots[0].cy + sh / 2 + 2 };
+  const avoid = [pile, board, ...peopleBoxes(cam, data.seats)];
+  // Nearest clear spot, a step at a time: in toward the middle, along the rail (toward me first), or back out.
+  const { nx, nz } = s.seat;
+  const side = nx >= 0 ? { x: nz, z: -nx } : { x: -nz, z: nx };
+  const dirs = [
+    { x: -nx, z: -nz },
+    side,
+    { x: -side.x, z: -side.z },
+    { x: nx, z: nz },
+  ];
+  for (let step = 0; step <= 12; step++) {
+    for (const d of step ? dirs : dirs.slice(0, 1)) {
+      const dx = d.x * 0.025 * step;
+      const dz = d.z * 0.025 * step;
+      if (!layout.some((c) => avoid.some((b) => overlaps(box(c, dx, dz), b)))) return layout.map((c) => ({ ...c, at: { ...c.at, x: c.at.x + dx, z: c.at.z + dz } }));
+    }
+  }
+  return layout;
 }
 
 /** Shown cards at showdown: nearly the board's size, so rank and suit both read. */
@@ -742,16 +888,19 @@ export function seatAnchors(
   cam: Camera,
   s: { seat: SeatSpot; me: boolean; stack: number; bet: number; stackChips: number; betChips: number },
   myZ: number,
-  myPerTower = 15,
+  people: Box[] = [],
 ) {
-  const { stack: stackAt, bet: betAt } = spots(s.seat, s.me, myZ);
+  const spot = spots(s.seat, s.me, myZ);
+  const stackAt = placePile(cam, s.stack, spot.stack, s.stackChips, s.me ? PILES.myStack : PILES.stack, s.seat, people);
+  const betAt = placePile(cam, s.bet, spot.bet, s.betChips, PILES.bet, s.seat, people);
   const person = personAt(cam, s.seat);
-  // The top of the head: the sprite's top edge plus its headroom.
-  const top = person.y - (RAIL_Y / 62) * person.height + Math.round((person.height * 5) / 62);
+  // The top of the head: the sprite's top edge plus its one row of headroom.
+  const { k, railY } = spriteMetrics(person.height);
+  const top = Math.round(person.y - railY) + k;
   return {
     head: { x: person.x, y: top },
     size: person.height,
-    stack: chipsExtent(cam, s.stack, stackAt, s.stackChips, s.me ? 5 : 3, s.me ? myPerTower : 15),
-    bet: chipsExtent(cam, s.bet, betAt, s.betChips),
+    stack: chipsExtent(cam, s.stack, stackAt.at, s.stackChips, stackAt.pile),
+    bet: chipsExtent(cam, s.bet, betAt.at, s.betChips, betAt.pile),
   };
 }

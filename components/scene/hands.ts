@@ -1,6 +1,8 @@
 /*
  * My hands, first person: holding my cards up toward me, lowered flat while I
- * hide them, or resting on the rail. Drawn once per look into a small canvas.
+ * hide them, or resting on the rail. Drawn once per look into a small canvas,
+ * at twice the scene's resolution (its own canvas layer), so the cards can be
+ * finer than the table. Cards are never rotated or scaled: glyphs stay whole.
  */
 import type { Card } from '@/lib/cards';
 import { BONE, INK, cardMarks, offscreen } from './glyphs';
@@ -11,16 +13,23 @@ const SKIN = { hi: '#f6d2ae', lit: '#e9b98f', mid: '#d39b73', shade: '#b27a58', 
 const CUFF = { lit: '#efe7d6', shade: '#c4b9a4' };
 const SLEEVE = { lit: '#3d4f94', shade: '#2a376d' };
 
-/** Card size for my hand: readable at a glance, about 38 CSS pixels wide on a phone. */
+/** Card size for my hand (scene pixels): readable at a glance, about 48 CSS pixels wide on a phone. */
 export function myCardWidth(canvasW: number, q: number): number {
-  return Math.max(16, Math.min(72, Math.round(Math.max(canvasW * 0.048, 38 / q))));
+  return Math.max(20, Math.min(90, Math.round(Math.max(canvasW * 0.06, 48 / q))));
 }
+
+/** Each card sits this far right of the one before (45% of a card), and `cardDrop` lower. */
+const cardStep = (cw: number) => Math.round(cw * 0.45);
+const cardDrop = (cw: number) => (cw >= 60 ? 4 : 3);
 
 /** The sprite's size for a card width and card count; the same in every mode so nothing jumps. */
 export function handsSize(cw: number, count: number): { w: number; h: number } {
   const ch = Math.round(cw * 1.4);
-  const spread = (count - 1) * (7 * indexScale(cw) + 6);
-  return { w: Math.round(cw * 2.6 + spread * 1.25), h: Math.round(ch * 1.36 + cw * 0.5) };
+  const n = Math.max(1, count);
+  return {
+    w: Math.round(cw + cardStep(cw) * (n - 1) + cw * 0.9),
+    h: Math.round(cw * 0.12 + ch + cardDrop(cw) * (n - 1) + cw * 0.55),
+  };
 }
 
 const cache = new Map<string, HTMLCanvasElement | null>();
@@ -43,8 +52,8 @@ export function handsSprite(look: { mode: HandsMode; cards: Card[]; count: numbe
   return canvas;
 }
 
-/** The corner index's scale on my cards: 3× when the card is big enough. */
-export const indexScale = (cw: number) => (cw >= 40 ? 3 : cw >= 26 ? 2 : 1);
+/** The corner index's scale on my cards: at least 3×, bigger on big cards. */
+export const indexScale = (cw: number) => Math.max(3, Math.floor(cw / 24));
 
 /** A card face at width `cw`: the rank and suit in the top-left corner, a big suit in the middle. */
 function cardFace(card: Card, cw: number): HTMLCanvasElement | null {
@@ -103,56 +112,43 @@ function sleeve(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, 
 function paintHolding(ctx: CanvasRenderingContext2D, cards: Card[], cw: number, w: number, h: number) {
   const ch = Math.round(cw * 1.4);
   const n = Math.max(1, cards.length);
-  // Fanned round a pivot well below the cards, as a hand holds them, so each corner index shows.
-  const radius = ch * 1.9;
-  const indexW = 7 * indexScale(cw) + 6;
-  // At the cards' tops the next card starts (radius + ch)·sin(step) further across: leave the index clear.
-  const step = Math.max(((n > 2 ? 7 : 10) * Math.PI) / 180, Math.asin(Math.min(0.9, indexW / (radius + ch))));
-  const pivot = { x: w / 2, y: Math.round(ch * 0.2) + ch + radius };
-  const left = -((n - 1) / 2) * step;
-  const right = ((n - 1) / 2) * step;
-  // A point on a card, in its own frame (x across from the middle, y up from the bottom edge), on the sprite.
-  const onCard = (angle: number, x: number, y: number) => {
-    const ly = -radius - y;
-    return { x: pivot.x + x * Math.cos(angle) - ly * Math.sin(angle), y: pivot.y + x * Math.sin(angle) + ly * Math.cos(angle) };
-  };
-  const gl = onCard(left, -cw / 2, 0);
-  const gr = onCard(right, cw / 2, 0);
+  const step = cardStep(cw);
+  const drop = cardDrop(cw);
+  // Upright and overlapping: each card further right and a little lower, so every corner index shows.
+  const x0 = Math.round(w / 2 - (cw + step * (n - 1)) / 2);
+  const top = Math.round(cw * 0.12);
+  const leftX = x0;
+  const rightX = x0 + step * (n - 1) + cw;
+  const bottomL = top + ch;
+  const bottomR = top + (n - 1) * drop + ch;
   const palm = { w: cw * 0.7, h: cw * 0.62 };
 
   // Forearms in their sleeves, off the bottom edge.
-  sleeve(ctx, gl.x - palm.w * 0.35, gl.y + palm.h * 0.35, palm.w * 0.78, h, true);
-  sleeve(ctx, gr.x - palm.w * 0.43, gr.y + palm.h * 0.35, palm.w * 0.78, h, false);
+  sleeve(ctx, leftX - palm.w * 0.35, bottomL + palm.h * 0.05, palm.w * 0.78, h, true);
+  sleeve(ctx, rightX - palm.w * 0.43, bottomR + palm.h * 0.05, palm.w * 0.78, h, false);
   // Fingers wrapped behind the cards: their tips show past the outer edges.
   const fw = Math.max(3, cw * 0.2);
   const fh = Math.max(2, cw * 0.12);
   for (let k = 0; k < 4; k++) {
     const up = ch * 0.18 + k * (fh + 1);
-    const l = onCard(left, -cw / 2, up);
-    const r = onCard(right, cw / 2, up);
-    blob(ctx, l.x - fw * 0.75, l.y - fh / 2, fw, fh, true);
-    blob(ctx, r.x - fw * 0.25, r.y - fh / 2, fw, fh, false);
+    blob(ctx, leftX - fw * 0.75, bottomL - up - fh / 2, fw, fh, true);
+    blob(ctx, rightX - fw * 0.25, bottomR - up - fh / 2, fw, fh, false);
   }
   // Palms behind the bottom corners.
-  blob(ctx, gl.x - palm.w * 0.45, gl.y - palm.h * 0.35, palm.w, palm.h, true);
-  blob(ctx, gr.x - palm.w * 0.55, gr.y - palm.h * 0.35, palm.w, palm.h, false);
+  blob(ctx, leftX - palm.w * 0.45, bottomL - palm.h * 0.35, palm.w, palm.h, true);
+  blob(ctx, rightX - palm.w * 0.55, bottomR - palm.h * 0.35, palm.w, palm.h, false);
 
-  // The cards.
+  // The cards, upright, at whole pixels.
   cards.forEach((card, i) => {
     const face = cardFace(card, cw);
-    if (!face) return;
-    ctx.save();
-    ctx.translate(pivot.x, pivot.y);
-    ctx.rotate(left + i * step);
-    ctx.drawImage(face, Math.round(-cw / 2), Math.round(-radius - ch));
-    ctx.restore();
+    if (face) ctx.drawImage(face, x0 + i * step, top + i * drop);
   });
 
-  // Thumbs in front, pressing on the bottom corners, with a nail catching the light.
-  const tl = onCard(left, -cw / 2 + cw * 0.16, ch * 0.08);
-  const tr = onCard(right, cw / 2 - cw * 0.16, ch * 0.08);
+  // Thumbs in front, on the bottom corners only (the corner index stays clear), a nail catching the light.
   const tw = cw * 0.26;
-  const th = cw * 0.34;
+  const th = cw * 0.3;
+  const tl = { x: leftX + cw * 0.14, y: bottomL - th * 0.35 };
+  const tr = { x: rightX - cw * 0.14, y: bottomR - th * 0.35 };
   blob(ctx, tl.x - tw / 2, tl.y - th / 2, tw, th, true);
   blob(ctx, tr.x - tw / 2, tr.y - th / 2, tw, th, false);
   ctx.fillStyle = SKIN.hi;
