@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import ActionDock from '@/components/ActionDock';
 import { JoinDock, RoomScreen } from '@/components/PartyRoom';
 import TableView from '@/components/TableView';
@@ -329,18 +329,116 @@ function FullScreen({ scene, panel }: { scene: Scene; panel: 'chips' | 'log' | n
   );
 }
 
+/* -------------------- animations: real before/after snapshots -------------------- */
+
+type AnimName = 'opp-allin' | 'my-allin' | 'showdown' | 'cardless-pot' | 'full';
+
+const ANIMS: [AnimName, string][] = [
+  ['opp-allin', 'Opponent all in'],
+  ['my-allin', 'My all in'],
+  ['showdown', 'Showdown (me + 3)'],
+  ['cardless-pot', 'Cardless pot'],
+  ['full', 'Full hand'],
+];
+
+let handOffset = 0;
+
+/** A fresh 4-player hand on a new hand number (so "once per hand" never blocks a replay). */
+function freshHand(cards: boolean): PartyRecord {
+  const rec = table(4, cards ? { mode: 'cards' } : { turnOrder: false, smallBlind: 0, bigBlind: 0 });
+  applyAction(rec, 'Mia', { type: 'chips', playerId: 'Jo', amount: -650 }, Date.now());
+  handOffset += 1;
+  rec.party.handNo = handOffset * 10;
+  applyAction(rec, 'Mia', { type: 'start_hand' }, Date.now(), deck(handOffset + 40));
+  return rec;
+}
+
+const clone = (rec: PartyRecord) => ({ party: structuredClone(rec.party), myCards: [...(rec.hole.Mia ?? [])] });
+const passiveStep = (rec: PartyRecord) => {
+  const id = rec.party.toActId!;
+  applyAction(rec, id, legalActions(rec.party, id).check ? { type: 'check' } : { type: 'call' }, Date.now());
+};
+
+/** The snapshots, in order, that make an animation happen. */
+function script(name: AnimName): ReturnType<typeof clone>[] {
+  if (name === 'cardless-pot') {
+    const rec = freshHand(false);
+    for (const id of ['Mia', 'Sam', 'Jo', 'Priya']) applyAction(rec, id, { type: 'bet', amount: 40 }, Date.now());
+    const before = clone(rec);
+    applyAction(rec, 'Mia', { type: 'award', winners: ['Sam'] }, Date.now());
+    return [before, clone(rec)];
+  }
+  const rec = freshHand(true);
+  if (name === 'opp-allin' || name === 'my-allin') {
+    const mine = name === 'my-allin';
+    for (let g = 0; g < 10 && (rec.party.toActId === 'Mia') !== mine; g++) passiveStep(rec);
+    const before = clone(rec);
+    applyAction(rec, rec.party.toActId!, { type: 'allin' }, Date.now());
+    return [before, clone(rec)];
+  }
+  if (name === 'showdown') {
+    for (let g = 0; g < 40 && rec.party.street !== 'river'; g++) passiveStep(rec);
+    for (let g = 0; g < 3; g++) passiveStep(rec);
+    const before = clone(rec);
+    passiveStep(rec);
+    return [before, clone(rec)];
+  }
+  // A whole hand: calls, an all-in from Jo, everyone calls, the board runs out, showdown, the pot.
+  const steps = [clone(rec)];
+  for (let g = 0; g < 40 && rec.party.phase === 'live'; g++) {
+    const id = rec.party.toActId!;
+    if (id === 'Jo' && rec.party.street === 'flop' && rec.party.players.find((p) => p.id === 'Jo')!.stack > 0) applyAction(rec, id, { type: 'allin' }, Date.now());
+    else passiveStep(rec);
+    steps.push(clone(rec));
+  }
+  return steps;
+}
+
+/** /dev/table?scene=anim: buttons that play each animation for me and for an opponent. `&play=…` starts one on load. */
+function AnimLab() {
+  const [snap, setSnap] = useState<ReturnType<typeof clone>>(() => clone(freshHand(true)));
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const run = useCallback((name: AnimName) => {
+    timers.current.forEach(clearTimeout);
+    const steps = script(name);
+    const gap = name === 'full' ? 700 : 250;
+    timers.current = steps.map((st, i) => setTimeout(() => setSnap(st), i * gap));
+  }, []);
+  useEffect(() => {
+    const play = new URLSearchParams(window.location.search).get('play') as AnimName | null;
+    if (!play || !ANIMS.some(([n]) => n === play)) return undefined;
+    const t = setTimeout(() => run(play), 900);
+    return () => clearTimeout(t);
+  }, [run]);
+  return (
+    <>
+      <div className="devAnim">
+        {ANIMS.map(([name, label]) => (
+          <button key={name} className="btn small quiet" onClick={() => run(name)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      <FullScreen scene={{ title: 'anim', party: snap.party, meId: 'Mia', myCards: snap.myCards }} panel={null} />
+    </>
+  );
+}
+
 export default function DevTables() {
   // Built after mount: the timer deadlines depend on the clock.
   const [list, setList] = useState<Scene[] | null>(null);
   const [full, setFull] = useState<{ scene: number; panel: 'chips' | 'log' | null } | null>(null);
+  const [anim, setAnim] = useState(false);
   useEffect(() => {
     setList(scenes());
     // ?scene=N shows scene N full screen; &panel=chips or &panel=log opens that panel.
     const q = new URLSearchParams(window.location.search);
     const panel = q.get('panel');
-    if (q.has('scene')) setFull({ scene: Number(q.get('scene')), panel: panel === 'chips' || panel === 'log' ? panel : null });
+    if (q.get('scene') === 'anim') setAnim(true);
+    else if (q.has('scene')) setFull({ scene: Number(q.get('scene')), panel: panel === 'chips' || panel === 'log' ? panel : null });
   }, []);
   if (!list) return null;
+  if (anim) return <AnimLab />;
   if (full && list[full.scene]) return <FullScreen scene={list[full.scene]} panel={full.panel} />;
   return (
     <main className="devTables">

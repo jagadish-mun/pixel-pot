@@ -40,6 +40,10 @@ export const LETTERS: Record<string, string[]> = {
   D: ['XX.', 'X.X', 'X.X', 'X.X', 'XX.'],
   S: ['.XX', 'X..', '.X.', '..X', 'XX.'],
   B: ['XX.', 'X.X', 'XX.', 'X.X', 'XX.'],
+  A: ['.X.', 'X.X', 'XXX', 'X.X', 'X.X'],
+  L: ['X..', 'X..', 'X..', 'X..', 'XXX'],
+  I: ['XXX', '.X.', '.X.', '.X.', 'XXX'],
+  N: ['X.X', 'XXX', 'XXX', 'X.X', 'X.X'],
 };
 
 export const suitColor = (card: string) => (card[1] === 'h' || card[1] === 'd' ? CARD_RED : CARD_BLACK);

@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { DEAL_MS, FLIP_MS, FOLD_MS, SWEEP_MS, drawScene, handsBox, personAt, seatAnchors, type Marker, type Motion, type SceneData } from './scene/draw';
+import { BADGE_MS, applyPending, clatter, overlayFor, type AnimView } from './scene/animate';
+import { DEAL_MS, FOLD_MS, SWEEP_MS, drawScene, handsBox, personAt, seatAnchors, type Marker, type Motion, type SceneData } from './scene/draw';
+import { AnimQueue, diffSnapshots } from './scene/events';
 import { handsSize, myCardWidth } from './scene/hands';
 import { BET_INSET, BOARD_Z, POT_SPOT, arrangeSeats, onFelt, spots } from './scene/layout';
 import { idle, poseOf } from './scene/people';
 import { fitCamera, project, type Camera } from './scene/project';
 import { WEALTH, chipTowers, wealthTarget } from '@/lib/chips';
-import { chips, signed } from '@/lib/client';
+import { chips, loadMuted, signed } from '@/lib/client';
 import { cardText, type Card } from '@/lib/cards';
 import { potOf, potsOf, usesTurns } from '@/lib/game';
 import { bestHand } from '@/lib/hand';
@@ -261,7 +263,7 @@ export default function TableView({
 
   const data: SceneData = {
     seats: seats.map(({ player: p, seat, me: mine }) => {
-      const shown = mine ? null : shownOf(p);
+      const shown = shownOf(p);
       const pose = poseOf(party, p, { acting: p.id === actingId, showing: Boolean(shown) });
       return {
         id: p.id,
@@ -291,26 +293,24 @@ export default function TableView({
   };
 
   /* ---------- motion: cards dealt in, bets slid into the pot, folds tossed, shown cards turned over ---------- */
-  const motion = useRef<Motion>({ dealt: new Map(), sweeps: [], folds: [], shown: new Map() });
-  const seen = useRef<{ hand: number; board: number; bets: Map<string, number>; folded: Set<string>; shown: Set<string> } | null>(null);
+  const motion = useRef<Motion>({ dealt: new Map(), sweeps: [], folds: [] });
+  const seen = useRef<{ hand: number; board: number; bets: Map<string, number>; folded: Set<string> } | null>(null);
   const boardCount = board.filter(Boolean).length;
   const betKey = party.players.map((p) => `${p.id}:${inFront(party, p)}`).join(',');
   const foldKey = party.players.filter((p) => p.folded).map((p) => p.id).join(',');
-  const shownKey = revealed ? Object.keys(party.shown).join(',') : '';
-  const latest = useRef({ data, cam });
-  latest.current = { data, cam };
+  const latest = useRef({ data, cam, revealed });
+  latest.current = { data, cam, revealed };
   useEffect(() => {
     const now = performance.now();
     const before = seen.current;
     const bets = new Map(party.players.map((p) => [p.id, inFront(party, p)]));
     const folded = new Set(foldKey ? foldKey.split(',') : []);
-    const shown = new Set(shownKey ? shownKey.split(',') : []);
-    seen.current = { hand: party.handNo, board: boardCount, bets, folded, shown };
+    seen.current = { hand: party.handNo, board: boardCount, bets, folded };
     const c = latest.current.cam;
     if (!before || still || !c) return;
     const m = motion.current;
     if (before.hand !== party.handNo) {
-      motion.current = { dealt: new Map(), sweeps: [], folds: [], shown: new Map() };
+      motion.current = { dealt: new Map(), sweeps: [], folds: [] };
       return;
     }
     for (let i = before.board; i < boardCount; i++) m.dealt.set(i, now + (i - before.board) * 160);
@@ -332,11 +332,28 @@ export default function TableView({
           m.folds.push({ from: { x: person.x, y: person.y - person.height * 0.35 }, count: holeCount, start: now, size: Math.max(4, Math.round(person.height * 0.2)) });
         }
       }
-      if (shown.has(p.id) && !before.shown.has(p.id)) m.shown.set(p.id, now);
     }
-    // Only when the hand, the board, the bets, the folds or the shown hands change.
+    // Only when the hand, the board, the bets or the folds change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [party.handNo, boardCount, betKey, foldKey, shownKey]);
+  }, [party.handNo, boardCount, betKey, foldKey]);
+
+  /* ---------- events: all-ins, cards shown, the pot won; worked out from snapshots and played in order ---------- */
+  const queue = useRef(new AnimQueue());
+  const lastSnapshot = useRef<Party | null>(null);
+  const badges = useRef<{ id: string; start: number }[]>([]);
+  useEffect(() => {
+    const prev = lastSnapshot.current;
+    lastSnapshot.current = structuredClone(party);
+    if (prev && prev.handNo !== party.handNo) queue.current.clear();
+    const events = diffSnapshots(prev, party);
+    // Reduced motion: skip the animations; the table already shows how things ended.
+    if (still) queue.current.markSeen(events);
+    else queue.current.push(events);
+  }, [party, still]);
+  // The hand-name pill over the winner while the pot goes to them.
+  const [winnerPill, setWinnerPill] = useState<{ id: string; name: string } | null>(null);
+  const pillShown = useRef<string | null>(null);
+  const lastStart = useRef(0);
 
   /* ---------- drawing: ~12 frames a second, paused while the tab is hidden; one still frame with reduced motion ---------- */
   const paint = useRef((now: number, moving: boolean) => {
@@ -347,11 +364,29 @@ export default function TableView({
     m.sweeps = m.sweeps.filter((s) => now - s.start < SWEEP_MS);
     m.folds = m.folds.filter((f) => now - f.start < FOLD_MS);
     for (const [i, t] of m.dealt) if (now - t > DEAL_MS) m.dealt.delete(i);
-    for (const [id, t] of m.shown) if (now - t > FLIP_MS) m.shown.delete(id);
     // Chips still sliding in aren't in the pot yet.
     const sliding = m.sweeps.reduce((sum, s) => sum + s.amount, 0);
     const started = performance.now();
-    drawScene(ctx, c, { ...d, pot: Math.max(0, d.pot - sliding) }, m, now, moving ? (seed) => idle(seed, now) : () => STILL);
+    // What's playing: start-of-event effects (badge, clatter, the winner's pill) happen once.
+    // Nothing starts while an all-in runout is still turning over the board: it would give the result away.
+    const playing = latest.current.revealed || queue.current.pending().length === 0 ? queue.current.step(now) : null;
+    if (playing && playing.start !== lastStart.current) {
+      lastStart.current = playing.start;
+      if (playing.event.type === 'allin') {
+        badges.current.push({ id: playing.event.id, start: now });
+        if (!loadMuted()) clatter();
+      }
+    }
+    const e = playing?.event;
+    const pill = e?.type === 'potToWinner' && e.name && playing!.t < 0.98 ? `${e.winners[0].id}|${e.name}` : null;
+    if (pill !== pillShown.current) {
+      pillShown.current = pill;
+      setWinnerPill(pill ? { id: pill.split('|')[0], name: pill.split('|')[1] } : null);
+    }
+    badges.current = badges.current.filter((b) => now - b.start < BADGE_MS);
+    const view: AnimView = { playing, pending: queue.current.pending(), badges: badges.current };
+    const shownData = applyPending({ ...d, pot: Math.max(0, d.pot - sliding) }, view);
+    drawScene(ctx, c, shownData, m, now, moving ? (seed) => idle(seed, now) : () => STILL, overlayFor(ctx, c, shownData, view, now));
     // /dev/table shows how long frames take.
     const stats = (window as { __sceneStats?: number[] }).__sceneStats;
     if (stats) stats.push(performance.now() - started);
@@ -479,6 +514,20 @@ export default function TableView({
             })}
           </ul>
 
+          {/* The winning hand's name, over the winner while the pot goes to them. */}
+          {winnerPill &&
+            (() => {
+              const k = seats.findIndex((x) => x.player.id === winnerPill.id);
+              if (k < 0) return null;
+              const mine = seats[k].me;
+              const pos = mine && handsAt ? at(handsAt.x + handsAt.w / 2, handsAt.y - 34 / q) : { left: Math.round(anchors[k].plate.x), top: Math.round(anchors[k].plate.y - anchors[k].plate.lift - 34) };
+              return (
+                <p className="winnerPill" style={pos} role="status">
+                  {winnerPill.name}
+                </p>
+              );
+            })()}
+
           {/* My hands: "You have" just above them; press and hold the cards (or Space) to lower them. */}
           {handsAt && (myHand || myTimer) && (
             <p className="myHand handsLabel" style={at(handsAt.x + handsAt.w / 2, handsAt.y)} aria-live="polite">
@@ -537,9 +586,9 @@ export default function TableView({
             (playing ? total > 0 : lastHand) && (
               <div
                 className="potLabel3d"
-                // During a hand, beside the pot's chips; between hands (no chips), centred where the pot sits.
-                data-centred={!playing}
-                style={playing ? at(project(cam, POT_SPOT.x + 0.12, 0, POT_SPOT.z).x, project(cam, POT_SPOT.x, 0, POT_SPOT.z).y) : at(project(cam, POT_SPOT.x - 0.02, 0, BOARD_Z).x, project(cam, 0, 0, BOARD_Z).y)}
+                // During a hand, just under the pot's chips; between hands (no chips), where the pot sits.
+                data-centred="true"
+                style={playing ? at(project(cam, POT_SPOT.x, 0, POT_SPOT.z - 0.09).x, project(cam, POT_SPOT.x, 0, POT_SPOT.z - 0.09).y) : at(project(cam, POT_SPOT.x - 0.02, 0, BOARD_Z).x, project(cam, 0, 0, BOARD_Z).y)}
                 aria-live="polite"
               >
                 <b>{chips(playing ? total : lastHand?.kind === 'hand' ? lastHand.pot : 0)}</b>

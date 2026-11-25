@@ -44,6 +44,11 @@ export function spots(seat: SeatSpot, me: boolean, myZ = -0.42): { cards: Vec; s
   return { cards: onFelt(seat, CARDS_INSET + 0.03), stack: onFelt(seat, STACK_INSET), bet: onFelt(seat, BET_INSET) };
 }
 
+/** Where my cards land when I show them: on the felt beside my chips, where my bet sits (it's in the pot by showdown). */
+export function myShowSpot(myZ: number): Vec {
+  return { x: -0.42, z: myZ + 0.05 };
+}
+
 /** The top of the rail in front of a seat, where an opponent rests their arms. */
 export function railPoint(seat: SeatSpot): Vec {
   return onFelt(seat, -RAIL_W / 2);
