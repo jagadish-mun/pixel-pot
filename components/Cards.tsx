@@ -1,59 +1,13 @@
-/* Card positions on the table: face up, face down, or an empty slot. The art lives in Pixels.tsx. */
+/* Face-up cards in the DOM: my own hand, and hands shown at showdown. The table's board and face-down cards are drawn on the canvas. */
 
-import { CardBack, PlayingCard } from './Pixels';
+import { PlayingCard } from './Pixels';
 import { cardText, type Card } from '@/lib/cards';
 
-/**
- * One card position. `card` shows it face up; `faceDown` draws a back;
- * otherwise the slot is empty, optionally labelled with the street a
- * cardless table has dealt. Without `width`, CSS sizes the slot.
- */
-export function CardSlot({
-  card,
-  faceDown,
-  label,
-  width,
-  win,
-  flip,
-}: {
-  card?: Card | null;
-  faceDown?: boolean;
-  label?: string;
-  width?: number;
-  /** Part of a winning hand: highlighted. */
-  win?: boolean;
-  /** Turn over as it appears (showdown). */
-  flip?: boolean;
-}) {
-  const style = width ? { width, height: (width * 14) / 10 } : undefined;
-  if (faceDown) {
-    return (
-      <span className="cardSlot" style={style}>
-        <CardBack />
-      </span>
-    );
-  }
-  if (card) {
-    return (
-      <span className="cardSlot face" style={style} data-win={win} data-flip={flip} role="img" aria-label={cardText(card)}>
-        <PlayingCard card={card} />
-      </span>
-    );
-  }
+/** One face-up card, `width` pixels wide. */
+function FaceCard({ card, width, win, flip }: { card: Card; width: number; win?: boolean; flip?: boolean }) {
   return (
-    <span className="cardSlot empty" style={style} data-dealt={Boolean(label)}>
-      {label && <small>{label}</small>}
-    </span>
-  );
-}
-
-/** A player's hole cards, face down, fanned slightly. */
-export function HoleCards({ count, width = 16 }: { count: number; width?: number }) {
-  return (
-    <span className="holeCards" aria-hidden="true">
-      {Array.from({ length: count }, (_, i) => (
-        <CardSlot key={i} faceDown width={width} />
-      ))}
+    <span className="cardSlot face" style={{ width, height: (width * 14) / 10 }} data-win={win} data-flip={flip} role="img" aria-label={cardText(card)}>
+      <PlayingCard card={card} />
     </span>
   );
 }
@@ -63,7 +17,7 @@ export function FaceCards({ cards, width, winning, flip }: { cards: Card[]; widt
   return (
     <span className="faceCards" role="group" aria-label={cards.map(cardText).join(' ')}>
       {cards.map((card) => (
-        <CardSlot key={card} card={card} width={width} win={winning?.has(card)} flip={flip} />
+        <FaceCard key={card} card={card} width={width} win={winning?.has(card)} flip={flip} />
       ))}
     </span>
   );

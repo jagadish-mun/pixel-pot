@@ -1,91 +1,22 @@
 'use client';
 
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { CardSlot, FaceCards, HoleCards } from './Cards';
-import { ChipStack, Face, RobotFace } from './Pixels';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { FaceCards } from './Cards';
+import { faceColor } from './Pixels';
+import { DEAL_MS, SWEEP_MS, drawScene, seatAnchors, type Motion, type SceneData } from './scene/draw';
+import { BET_INSET, POT_SPOT, arrangeSeats, onFelt } from './scene/layout';
+import { TABLE_R, fitCamera, project, type Camera } from './scene/project';
+import { chipTowers } from '@/lib/chips';
 import { chips, signed } from '@/lib/client';
 import type { Card } from '@/lib/cards';
 import { potOf, potsOf, usesTurns } from '@/lib/game';
 import { bestHand } from '@/lib/hand';
 import type { Action, Party, Player, Street } from '@/lib/types';
 
-/*
- * Seat geometry. Seats sit on an ellipse, evenly spaced by distance along it
- * (not by angle, which bunches seats at the narrow ends). The ring's width ÷
- * height differs between the tall portrait oval and the wide landscape one, so
- * both layouts are computed and CSS picks one with a media query.
- */
-const TALL_RING = 0.62; // portrait phones: the seat ring is about 0.62 as wide as it is tall
-const WIDE_RING = 1.9; // landscape and desktop
-
-/** `n` points on an ellipse with width/height `ratio`, starting at the bottom and going clockwise. */
-function ring(n: number, ratio: number): [number, number][] {
-  const steps = 720;
-  const at = (i: number) => Math.PI / 2 + (i / steps) * Math.PI * 2;
-  const lengths = [0];
-  for (let i = 1; i <= steps; i++) {
-    const dx = ratio * (Math.cos(at(i)) - Math.cos(at(i - 1)));
-    const dy = Math.sin(at(i)) - Math.sin(at(i - 1));
-    lengths.push(lengths[i - 1] + Math.hypot(dx, dy));
-  }
-  const total = lengths[steps];
-  const out: [number, number][] = [];
-  let i = 0;
-  for (let k = 0; k < n; k++) {
-    const want = (k / n) * total;
-    while (lengths[i] < want) i++;
-    out.push([Math.cos(at(i)), Math.sin(at(i))]);
-  }
-  return out;
-}
-
-const round = (n: number) => Math.round(n * 1000) / 1000;
-
-/**
- * How far (in px, x and y) to move a bet from its seat toward the middle so it
- * just clears the seat box. `x, y` is the seat's place on the ring and `ratio`
- * the ring's width/height, so the direction is right on a tall or a wide oval.
- */
-function betShift(x: number, y: number, ratio: number, halfW: number, halfH: number): [string, string] {
-  const len = Math.hypot(x * ratio, y) || 1;
-  const ux = (x * ratio) / len;
-  const uy = y / len;
-  const d = Math.min(Math.abs(ux) > 0.01 ? halfW / Math.abs(ux) : Infinity, Math.abs(uy) > 0.01 ? halfH / Math.abs(uy) : Infinity);
-  return [`${Math.round(ux * d)}px`, `${Math.round(uy * d)}px`];
-}
-
-// Seat box sizes (px) as styled in globals.css, plus room for half a bet beside it (bets are taller than wide).
-const SEAT = { tall: [78, 83], crowd: [64, 73], wide: [96, 83] };
-const BET_ROOM_X = 16;
-const BET_ROOM_Y = 24;
-
 /** Chips this player has in front of them: this street's bets, or the whole hand on free-play tables. */
 const inFront = (party: Party, p: Player) => (usesTurns(party) ? p.roundBet : p.bet);
 
-/** A player's bet on the felt. When it drops to zero the chips slide into the pot before disappearing. */
-function BetChips({ amount, style }: { amount: number; style: CSSProperties }) {
-  const [shown, setShown] = useState(amount);
-  const [sweeping, setSweeping] = useState(false);
-  useEffect(() => {
-    if (amount > 0) {
-      setShown(amount);
-      setSweeping(false);
-      return;
-    }
-    setSweeping(true);
-    const t = setTimeout(() => setShown(0), 450);
-    return () => clearTimeout(t);
-  }, [amount]);
-  if (shown <= 0) return null;
-  return (
-    <div className="tvBet" style={style} data-sweep={sweeping} aria-hidden="true">
-      <ChipStack amount={shown} scale={2} maxColumns={1} maxPerColumn={4} />
-      <span>{chips(shown)}</span>
-    </div>
-  );
-}
-
-/** A square ring of pixels around a face that empties as the turn timer runs down. */
+/** A square ring of pixels that empties as the turn timer runs down. */
 function TimerRing({ deadline, seconds }: { deadline: number; seconds: number }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -112,7 +43,6 @@ function TimerRing({ deadline, seconds }: { deadline: number; seconds: number })
 }
 
 const DEALT: Record<Street, number> = { preflop: 0, flop: 3, turn: 4, river: 5 };
-const SLOT_STREET = ['Flop', 'Flop', 'Flop', 'Turn', 'River'];
 const DEAL_HOW: Record<string, string> = { flop: 'Burn 1, deal 3', turn: 'Burn 1, deal 1', river: 'Burn 1, deal 1' };
 
 /**
@@ -139,105 +69,52 @@ function useBoardReveal(length: number): number {
   return Math.min(visible, length);
 }
 
-function Seat({
-  p,
-  party,
-  isMe,
-  style,
-  faceUp,
-  winning,
-  won,
-}: {
-  p: Player;
-  party: Party;
-  isMe: boolean;
-  style: CSSProperties;
-  /** Hole cards to show face up: mine, or anyone's at showdown. */
-  faceUp: Card[] | null;
-  winning: Set<string>;
-  won: boolean;
-}) {
-  const playing = party.phase !== 'idle';
-  const turns = usesTurns(party);
-  const acting = turns && party.phase === 'live' && !party.awaitingDeal && party.toActId === p.id;
-  const out = playing ? !p.inHand || p.folded : p.stack === 0;
-
-  let status: ReactNode = null;
-  if (playing) {
-    if (!p.inHand) status = <span className="dim">{p.stack === 0 ? 'Out' : 'Next hand'}</span>;
-    else if (p.folded) status = <span className="tag folded">Folded</span>;
-    else if (p.stack === 0) status = <span className="tag allin">All in</span>;
-    else if (p.lastAction) status = <span className="tag move">{p.lastAction}</span>;
-  } else if (p.stack === 0) {
-    status = <span className="dim">Out</span>;
-  } else if (p.lastDelta !== null && party.handNo > 0) {
-    status = <span className={p.lastDelta > 0 ? 'up' : p.lastDelta < 0 ? 'down' : 'dim'}>{p.lastDelta === 0 ? 'Even' : signed(p.lastDelta)}</span>;
-  }
-
-  const roles = [
-    party.dealerId === p.id && ['D', 'dealer', 'Dealer'],
-    party.sbId === p.id && ['SB', 'blind', 'Small blind'],
-    party.bbId === p.id && ['BB', 'blind', 'Big blind'],
-  ].filter(Boolean) as [string, string, string][];
-
-  const omaha = party.settings.variant === 'omaha';
-  const timer = acting && party.turnDeadline && party.settings.actionTimer > 0 && (
-    <TimerRing deadline={party.turnDeadline} seconds={party.settings.actionTimer} />
-  );
-
-  const label = [
-    p.name,
-    `${chips(p.stack)} chips`,
-    ...(playing ? roles.map((r) => r[2]) : []),
-    acting && 'to act',
-    playing && p.folded && 'folded',
-    playing && p.lastAction && !p.folded && p.lastAction,
-  ]
-    .filter(Boolean)
-    .join(', ');
-
-  return (
-    <li className="tvSeat" style={style} data-me={isMe} data-out={out} data-turn={acting} data-won={won} aria-label={label}>
-      {acting && <span className="tvPointer" aria-hidden="true" />}
-      {!faceUp && playing && p.inHand && !p.folded && <HoleCards count={omaha ? 4 : 2} width={12} />}
-      <span className={faceUp ? 'tvFace tvCards' : 'tvFace'}>
-        {faceUp ? (
-          // My own cards, big; anyone else's flip over at showdown.
-          <FaceCards cards={faceUp} width={isMe ? (omaha ? 20 : 28) : omaha ? 15 : 22} winning={winning} flip={!isMe} />
-        ) : (
-          p.bot ? <RobotFace seed={p.id + p.name} size={28} /> : <Face seed={p.id + p.name} size={28} />
-        )}
-        {timer}
-      </span>
-      <span className="tvName">
-        {p.bot && (
-          <span className="tag botTag" title={`Computer player (${p.bot.level})`}>
-            AI
-          </span>
-        )}
-        {p.name}
-      </span>
-      <span className="tvStack">{chips(p.stack)}</span>
-      <span className="tvTags">
-        {playing &&
-          roles.map(([text, kind, title]) => (
-            <span key={text} className={`tag ${kind}`} title={title}>
-              {text}
-            </span>
-          ))}
-        {acting && p.bot ? (
-          <span className="tag thinking" aria-label="thinking">
-            thinking<i>.</i>
-            <i>.</i>
-            <i>.</i>
-          </span>
-        ) : (
-          status
-        )}
-      </span>
-    </li>
-  );
+/**
+ * The canvas size: about 480 internal pixels across, chosen so each internal
+ * pixel is a whole number of device pixels (crisp, even pixels). `q` is CSS
+ * pixels per internal pixel.
+ */
+function useCanvasSize(box: RefObject<HTMLDivElement | null>) {
+  const [size, setSize] = useState<{ w: number; h: number; q: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const measure = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const cssW = el.clientWidth;
+      const cssH = el.clientHeight;
+      if (!cssW || !cssH) return;
+      const k = Math.max(1, Math.round((cssW * dpr) / 480));
+      setSize((old) => {
+        const next = { w: Math.ceil((cssW * dpr) / k), h: Math.ceil((cssH * dpr) / k), q: k / dpr };
+        return old && old.w === next.w && old.h === next.h && old.q === next.q ? old : next;
+      });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [box]);
+  return size;
 }
+
+function useReducedMotion(): boolean {
+  const [still, setStill] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setStill(mq.matches);
+    update();
+    mq.addEventListener('change', update);
+    return () => mq.removeEventListener('change', update);
+  }, []);
+  return still;
+}
+
+/** Room kept free round the table for the DOM labels, in CSS pixels. */
+const MARGIN = { top: 50, side: 10, bottom: 2 };
+const MY_STRIP = 64;
+/** Name plates stay this far (CSS px, to their middle) from the sides. */
+const PLATE_HALF = 42;
 
 export default function TableView({
   party,
@@ -256,152 +133,386 @@ export default function TableView({
   /** Cards mode: my own hole cards, which only my browser receives. */
   myCards?: Card[] | null;
 }) {
-  const n = party.players.length;
+  const box = useRef<HTMLDivElement>(null);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const size = useCanvasSize(box);
+  const still = useReducedMotion();
+  const cam: Camera | null = useMemo(
+    () => {
+      if (!size) return null;
+      // Tall screens have height to spare: my plate and cards get a strip below the near rail.
+      const bottom = size.h > size.w * 1.05 ? MY_STRIP : MARGIN.bottom;
+      return fitCamera(size.w, size.h, { top: MARGIN.top / size.q, side: MARGIN.side / size.q, bottom: bottom / size.q });
+    },
+    [size],
+  );
+
   const turns = usesTurns(party);
   const playing = party.phase !== 'idle';
+  const cardsMode = party.settings.mode === 'cards';
+  const omaha = party.settings.variant === 'omaha';
 
-  // I sit at the bottom. Spectators see the table from the host's seat.
-  let bottom = party.players.findIndex((p) => p.id === meId);
-  if (bottom < 0) bottom = Math.max(0, party.players.findIndex((p) => p.id === party.hostId));
-  const tall = ring(n, TALL_RING);
-  const wide = ring(n, WIDE_RING);
-  const seatTall = n >= 7 ? SEAT.crowd : SEAT.tall;
-  const place = (i: number): CSSProperties => {
-    const k = (i - bottom + n) % n;
-    const [tx, ty] = tall[k];
-    const [wx, wy] = wide[k];
-    // Bets sit at their seat's place, shifted toward the middle just past the seat box.
-    const [tbx, tby] = betShift(tx, ty, TALL_RING, seatTall[0] / 2 + BET_ROOM_X, seatTall[1] / 2 + BET_ROOM_Y);
-    const [wbx, wby] = betShift(wx, wy, WIDE_RING, SEAT.wide[0] / 2 + BET_ROOM_X, SEAT.wide[1] / 2 + BET_ROOM_Y);
-    return {
-      '--sx': round(tx),
-      '--sy': round(ty),
-      '--wx': round(wx),
-      '--wy': round(wy),
-      '--tbx': tbx,
-      '--tby': tby,
-      '--wbx': wbx,
-      '--wby': wby,
-    } as CSSProperties;
-  };
+  // I sit at the near side. Spectators see the table from the host's chair.
+  let meIndex = party.players.findIndex((p) => p.id === meId);
+  if (meIndex < 0) meIndex = Math.max(0, party.players.findIndex((p) => p.id === party.hostId));
+  const seats = arrangeSeats(party.players, meIndex);
 
   const total = potOf(party);
   const middle = total - party.players.reduce((sum, p) => sum + inFront(party, p), 0);
   // Side pots only once this street's chips are in the middle; mid-street, uncalled bets would look like pots.
   const sidePots = middle === total ? potsOf(party).filter((pot) => pot.eligible.length >= 2) : [];
-
-  // Between hands, the middle says how the last hand ended.
   const lastHand = [...party.log].reverse().find((e) => e.kind === 'hand');
-  let potLine = playing ? 'Pot' : 'Deal the next hand';
+  let potLine = 'Pot';
   if (!playing && lastHand?.kind === 'hand') {
     const names = lastHand.rows.filter((r) => lastHand.winners.includes(r.id)).map((r) => r.name);
     potLine = names.length ? `Last pot went to ${names.join(' & ')}` : 'Last pot';
   }
-  const shownPot = playing ? total : lastHand?.kind === 'hand' ? lastHand.pot : 0;
 
-  // Cards mode: the board as revealed so far, and once it's all out, the showdown.
-  const cardsMode = party.settings.mode === 'cards';
+  // The board as revealed so far, and once it's all out, the showdown.
   const visible = useBoardReveal(party.board.length);
   const revealed = visible === party.board.length;
-  const board = party.board.slice(0, visible);
   const winners = revealed ? party.handResults.filter((r) => r.amount > 0) : [];
   const winning = new Set<string>(winners.flatMap((r) => r.best));
+  const awaiting = turns && party.phase === 'live' ? party.awaitingDeal : null;
+  let dealt = turns && playing ? DEALT[party.street] : 0;
+  if (awaiting) dealt -= awaiting === 'flop' ? 3 : 1;
+  // Cards tables show the real board; cardless tables show a face-down card for each one dealt at the table.
+  const board: SceneData['board'] = Array.from({ length: 5 }, (_, i) =>
+    cardsMode ? (i < visible ? party.board[i] : null) : i < dealt ? 'back' : null,
+  );
   const me = party.players.find((p) => p.id === meId);
+  const myHand =
+    cardsMode && myCards?.length && playing && me?.inHand && !me.folded ? bestHand(myCards, party.board.slice(0, visible), party.settings.variant).name : null;
   const faceUp = (p: Player): Card[] | null => {
     if (revealed && party.shown[p.id]) return party.shown[p.id];
     if (p.id === meId && myCards?.length) return myCards;
     return null;
   };
-  const myHand =
-    cardsMode && myCards?.length && playing && me?.inHand && !me.folded ? bestHand(myCards, board, party.settings.variant).name : null;
+  const actingId = turns && party.phase === 'live' && !party.awaitingDeal ? party.toActId : null;
 
-  const awaiting = turns && party.phase === 'live' ? party.awaitingDeal : null;
+  const data: SceneData = {
+    seats: seats.map(({ player: p, seat, me: mine }) => ({
+      seat,
+      me: mine,
+      color: faceColor(p.id + p.name),
+      dim: playing ? !p.inHand || p.folded : p.stack === 0,
+      cards: playing && p.inHand && !p.folded && !faceUp(p) ? (omaha ? 4 : 2) : 0,
+      stack: p.stack,
+      bet: inFront(party, p),
+      acting: p.id === actingId,
+    })),
+    board,
+    winning,
+    pot: Math.max(0, middle),
+    dealerSeat: seats.find((s) => s.player.id === party.dealerId)?.seat ?? null,
+  };
+
+  /* ---------- motion: new board cards are dealt in; bets slide into the pot ---------- */
+  const motion = useRef<Motion>({ dealt: new Map(), sweeps: [] });
+  const seen = useRef<{ hand: number; board: number; bets: Map<string, number> } | null>(null);
+  const boardCount = board.filter(Boolean).length;
+  const betKey = party.players.map((p) => `${p.id}:${inFront(party, p)}`).join(',');
+  useEffect(() => {
+    const now = performance.now();
+    const before = seen.current;
+    const bets = new Map(party.players.map((p) => [p.id, inFront(party, p)]));
+    seen.current = { hand: party.handNo, board: boardCount, bets };
+    if (!before || still) return;
+    if (before.hand !== party.handNo) {
+      motion.current = { dealt: new Map(), sweeps: [] };
+      return;
+    }
+    for (let i = before.board; i < boardCount; i++) motion.current.dealt.set(i, now + (i - before.board) * 160);
+    for (const { player: p, seat } of arrangeSeats(party.players, meIndex)) {
+      const was = before.bets.get(p.id) ?? 0;
+      if (was > 0 && (bets.get(p.id) ?? 0) === 0) motion.current.sweeps.push({ from: onFelt(seat, BET_INSET), amount: was, start: now });
+    }
+    // Only when the hand, the board or the bets change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [party.handNo, boardCount, betKey]);
+
+  /* ---------- drawing: ~12 frames a second, paused while the tab is hidden; one still frame with reduced motion ---------- */
+  const latest = useRef({ data, cam });
+  latest.current = { data, cam };
+  const paint = useRef((now: number) => {
+    const ctx = canvas.current?.getContext('2d');
+    const { data: d, cam: c } = latest.current;
+    if (!ctx || !c) return;
+    const m = motion.current;
+    m.sweeps = m.sweeps.filter((s) => now - s.start < SWEEP_MS);
+    for (const [i, t] of m.dealt) if (now - t > DEAL_MS) m.dealt.delete(i);
+    // Chips still sliding in aren't in the pot yet.
+    const sliding = m.sweeps.reduce((sum, s) => sum + s.amount, 0);
+    drawScene(ctx, c, { ...d, pot: Math.max(0, d.pot - sliding) }, m, now);
+  });
+  useEffect(() => {
+    if (!cam || still) return;
+    let frame = 0;
+    let last = 0;
+    const loop = (now: number) => {
+      frame = requestAnimationFrame(loop);
+      if (now - last < 1000 / 12) return;
+      last = now;
+      paint.current(now);
+    };
+    const start = () => {
+      cancelAnimationFrame(frame);
+      if (!document.hidden) frame = requestAnimationFrame(loop);
+    };
+    start();
+    document.addEventListener('visibilitychange', start);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener('visibilitychange', start);
+    };
+  }, [cam, still]);
+  // Reduced motion: no loop, just a fresh still frame whenever something changes.
+  useEffect(() => {
+    if (cam && still) paint.current(performance.now());
+  });
+
+  /* ---------- DOM labels over the canvas ---------- */
+  const q = size?.q ?? 1;
+  const at = (x: number, y: number): CSSProperties => ({ left: Math.round(x * q), top: Math.round(y * q) });
+  const lobbyNow = Boolean(lobby) && !playing && party.handNo === 0;
   const dealer = party.players.find((p) => p.id === party.dealerId);
   const canDeal = Boolean(meId && (meId === party.dealerId || meId === party.hostId));
-  let dealt = turns && playing ? DEALT[party.street] : 0;
-  if (awaiting) dealt -= awaiting === 'flop' ? 3 : 1;
+  const mine = me ? faceUp(me) : null;
 
-  let centre: ReactNode;
-  if (lobby && !playing && party.handNo === 0) {
-    centre = lobby;
-  } else if (awaiting) {
-    centre = (
-      <div className="dealPrompt" role="status">
-        <p className="dealTitle">Deal the {awaiting}</p>
-        <p>{DEAL_HOW[awaiting]}</p>
-        {canDeal ? (
-          <button className="btn green" disabled={busy || !act} onClick={() => act?.({ type: 'dealt' })}>
-            {awaiting[0].toUpperCase() + awaiting.slice(1)} is out
-          </button>
-        ) : (
-          <p className="dim">
-            Waiting for {dealer?.name ?? 'the dealer'} to deal the {awaiting}
-          </p>
-        )}
-      </div>
-    );
-  } else {
-    centre = (
-      <>
-        {cardsMode ? (
-          <div className="tvBoard" role="group" aria-label="Board">
-            {SLOT_STREET.map((_, i) => (
-              <CardSlot key={i} card={board[i]} win={board[i] ? winning.has(board[i]) : false} />
-            ))}
-          </div>
-        ) : (
-          <div className="tvBoard" aria-label={dealt ? `Board: ${SLOT_STREET[dealt - 1].toLowerCase()} dealt` : 'Board'}>
-            {SLOT_STREET.map((street, i) => (
-              <CardSlot key={i} label={i < dealt ? street : undefined} />
-            ))}
-          </div>
-        )}
-        <div className="tvPot" aria-live="polite">
-          {middle > 0 && <ChipStack amount={middle} scale={2} maxColumns={3} maxPerColumn={6} />}
-          <p className="tvPotAmount">{chips(shownPot)}</p>
-          <p className="tvPotLine">{party.phase === 'showdown' ? 'Showdown' : potLine}</p>
-          {sidePots.length > 1 && (
-            <p className="tvSidePots">
-              {sidePots.map((pot, i) => (
-                <span key={i}>
-                  {i === 0 ? 'Main' : `Side ${i}`} {chips(pot.amount)}
-                </span>
-              ))}
-            </p>
-          )}
-        </div>
-      </>
-    );
-  }
+  // Where each seat's labels go, in CSS pixels.
+  const anchors = cam
+    ? seats.map(({ player: p, seat, me: isMe }) => {
+        const a = seatAnchors(cam, { seat, me: isMe, stack: p.stack, bet: inFront(party, p) });
+        const x = Math.min(Math.max(a.head.x * q, PLATE_HALF), cam.w * q - PLATE_HALF);
+        return { ...a, plate: { x, y: a.head.y * q, lift: 0 }, stackAt: { x: a.stack.x * q, y: a.stack.bottom * q } };
+      })
+    : [];
+  // Stacks too close together for their own labels: the total goes on the player's plate instead.
+  const crowded = anchors.some((a, i) =>
+    anchors.some((b, j) => i > 0 && j > 0 && i !== j && Math.abs(a.stackAt.x - b.stackAt.x) < 52 && Math.abs(a.stackAt.y - b.stackAt.y) < 22),
+  );
+  // Name plates that would overlap a neighbour's are lifted, a plate's height at a time, into the room above.
+  const PLATE = { w: crowded ? 62 : 76, h: crowded ? 40 : 30 };
+  const placed: { x: number; y: number }[] = [];
+  anchors
+    .map((a, i) => ({ a, i }))
+    .filter(({ i }) => i > 0)
+    .sort((m, n) => m.a.plate.x - n.a.plate.x)
+    .forEach(({ a }) => {
+      const clash = () => placed.some((o) => Math.abs(o.x - a.plate.x) < PLATE.w && Math.abs(o.y - (a.plate.y - a.plate.lift)) < PLATE.h);
+      while (clash() && a.plate.lift < PLATE.h * 3) a.plate.lift += PLATE.h;
+      placed.push({ x: a.plate.x, y: a.plate.y - a.plate.lift });
+    });
 
   return (
-    <>
-    <div className="tv" data-turns={turns} data-crowd={n >= 7} data-cards={cardsMode}>
-      <div className="tvFelt" aria-hidden="true" />
-      <div className="tvCentre">{centre}</div>
-      {party.players.map((p, i) => (
-        <BetChips key={p.id} amount={inFront(party, p)} style={place(i)} />
-      ))}
-      <ul className="tvSeats" aria-label="Players">
-        {party.players.map((p, i) => (
-          <Seat
-            key={p.id}
-            p={p}
-            party={party}
-            isMe={p.id === meId}
-            style={place(i)}
-            faceUp={faceUp(p)}
-            winning={winning}
-            won={winners.some((r) => r.id === p.id)}
-          />
-        ))}
-      </ul>
+    <div className="scene" ref={box} data-cards={cardsMode}>
+      {size && (
+        <canvas ref={canvas} className="sceneCanvas" width={size.w} height={size.h} style={{ width: size.w * q, height: size.h * q }} aria-hidden="true" />
+      )}
+      {cam && (
+        <>
+          <ul className="sceneSeats" aria-label="Players">
+            {seats.map(({ player: p, me: isMe }, k) => {
+              const bet = inFront(party, p);
+              const a = anchors[k];
+              const acting = p.id === actingId;
+              const stackOnPlate = crowded && !isMe;
+              const shown = isMe ? null : faceUp(p);
+              const { undrawn } = chipTowers(p.stack);
+              return (
+                <li key={p.id} className="seatGroup" aria-label={seatLabel(party, p, acting)}>
+                  <Plate
+                    party={party}
+                    p={p}
+                    acting={acting}
+                    me={isMe}
+                    won={winners.some((r) => r.id === p.id)}
+                    style={isMe ? undefined : ({ left: Math.round(a.plate.x), top: Math.round(a.plate.y - a.plate.lift), '--lift': `${a.plate.lift}px` } as CSSProperties)}
+                    hand={isMe ? myHand : null}
+                    stack={stackOnPlate && p.stack > 0 ? chips(p.stack) : null}
+                    compact={crowded}
+                  >
+                    {shown && <FaceCards cards={shown} width={omaha ? 13 : 18} winning={winning} flip />}
+                  </Plate>
+                  {p.stack > 0 && !stackOnPlate && (
+                    <span className="chipLabel" data-me={isMe} style={at(isMe ? 2 * a.stack.x - a.stack.right : a.stack.right, a.stack.bottom)} aria-hidden="true">
+                      {chips(p.stack)}
+                      {undrawn > 0 && <small>+{chips(undrawn)}</small>}
+                    </span>
+                  )}
+                  {bet > 0 && (isMe || !crowded) && (
+                    <span className="chipLabel bet" style={at(a.bet.right, a.bet.bottom)} aria-hidden="true">
+                      {chips(bet)}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+
+          {/* My own cards, big, at the near rail. */}
+          {mine && (
+            <div className="myCards" style={at(project(cam, 0.36, 0, -TABLE_R).x, cam.h)}>
+              <FaceCards cards={mine} width={omaha ? 24 : 32} winning={winning} />
+            </div>
+          )}
+
+          {/* The middle of the felt: the lobby, a deal prompt, or the pot's total. */}
+          {lobbyNow ? (
+            <div className="sceneCentre" style={at(cam.w / 2, project(cam, 0, 0, 0.05).y)}>
+              {lobby}
+            </div>
+          ) : awaiting ? (
+            <div className="sceneCentre" style={at(cam.w / 2, project(cam, 0, 0, 0.05).y)}>
+              <div className="dealPrompt" role="status">
+                <p className="dealTitle">Deal the {awaiting}</p>
+                <p>{DEAL_HOW[awaiting]}</p>
+                {canDeal ? (
+                  <button className="btn green" disabled={busy || !act} onClick={() => act?.({ type: 'dealt' })}>
+                    {awaiting[0].toUpperCase() + awaiting.slice(1)} is out
+                  </button>
+                ) : (
+                  <p className="dim">
+                    Waiting for {dealer?.name ?? 'the dealer'} to deal the {awaiting}
+                  </p>
+                )}
+              </div>
+            </div>
+          ) : (
+            (playing ? total > 0 : lastHand) && (
+              <div className="potLabel3d" style={at(project(cam, POT_SPOT.x + 0.15, 0, POT_SPOT.z).x, project(cam, 0, 0, POT_SPOT.z).y)} aria-live="polite">
+                <b>{chips(playing ? total : lastHand?.kind === 'hand' ? lastHand.pot : 0)}</b>
+                <span>{party.phase === 'showdown' ? 'Showdown' : potLine}</span>
+                {sidePots.length > 1 && (
+                  <span className="sidePots">
+                    {sidePots.map((pot, i) => (
+                      <span key={i}>
+                        {i === 0 ? 'Main' : `Side ${i}`} {chips(pot.amount)}
+                      </span>
+                    ))}
+                  </span>
+                )}
+              </div>
+            )
+          )}
+          {cardsMode && party.board.length > 0 && <p className="sr">Board: {party.board.slice(0, visible).join(' ')}</p>}
+        </>
+      )}
     </div>
-    {myHand && (
-      <p className="myHand" aria-live="polite">
-        You have: <b>{myHand}</b>
-      </p>
-    )}
-    </>
+  );
+}
+
+function roles(party: Party, p: Player): [string, string, string][] {
+  return [
+    party.dealerId === p.id && ['D', 'dealer', 'Dealer'],
+    party.sbId === p.id && ['SB', 'blind', 'Small blind'],
+    party.bbId === p.id && ['BB', 'blind', 'Big blind'],
+  ].filter(Boolean) as [string, string, string][];
+}
+
+function seatLabel(party: Party, p: Player, acting: boolean): string {
+  const playing = party.phase !== 'idle';
+  return [
+    p.name,
+    `${chips(p.stack)} chips`,
+    ...(playing ? roles(party, p).map((r) => r[2]) : []),
+    acting && 'to act',
+    playing && p.folded && 'folded',
+    playing && p.lastAction && !p.folded && p.lastAction,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
+/** A seat's name plate: name, AI badge, D/SB/BB, the latest move, and the turn arrow with its timer. */
+function Plate({
+  party,
+  p,
+  acting,
+  me,
+  won,
+  style,
+  hand,
+  stack,
+  compact,
+  children,
+}: {
+  party: Party;
+  p: Player;
+  acting: boolean;
+  me: boolean;
+  won: boolean;
+  style?: CSSProperties;
+  /** My best hand so far ("Pair of Queens"), on my own plate. */
+  hand?: string | null;
+  /** The stack total, when the table is too crowded to label it by the chips. */
+  stack?: string | null;
+  compact?: boolean;
+  children?: ReactNode;
+}) {
+  const playing = party.phase !== 'idle';
+  let status: ReactNode = null;
+  if (playing) {
+    if (!p.inHand) status = <span className="dim">{p.stack === 0 ? 'Out' : 'Next hand'}</span>;
+    else if (p.folded) status = <span className="tag folded">Folded</span>;
+    else if (p.stack === 0) status = <span className="tag allin">All in</span>;
+    else if (p.lastAction) status = <span className="tag move">{p.lastAction}</span>;
+  } else if (p.stack === 0) {
+    status = <span className="dim">Out</span>;
+  } else if (p.lastDelta !== null && party.handNo > 0) {
+    status = <span className={p.lastDelta > 0 ? 'up' : p.lastDelta < 0 ? 'down' : 'dim'}>{p.lastDelta === 0 ? 'Even' : signed(p.lastDelta)}</span>;
+  }
+  const timer = acting && party.turnDeadline && party.settings.actionTimer > 0 && (
+    <TimerRing deadline={party.turnDeadline} seconds={party.settings.actionTimer} />
+  );
+  return (
+    <div
+      className="plate"
+      style={style}
+      data-me={me}
+      data-turn={acting}
+      data-won={won}
+      data-compact={compact}
+      data-out={playing ? !p.inHand || p.folded : p.stack === 0}
+    >
+      {acting && (
+        <span className="turnArrow" aria-hidden="true">
+          {timer}
+          <span className="tvPointer" />
+        </span>
+      )}
+      {children}
+      <span className="plateName">
+        {p.bot && (
+          <span className="tag botTag" title={`Computer player (${p.bot.level})`}>
+            AI
+          </span>
+        )}
+        {p.name}
+      </span>
+      {stack && <span className="plateStack">{stack}</span>}
+      <span className="plateTags">
+        {playing &&
+          roles(party, p).map(([text, kind, title]) => (
+            <span key={text} className={`tag ${kind}`} title={title}>
+              {text}
+            </span>
+          ))}
+        {acting && p.bot ? (
+          <span className="tag thinking" aria-label="thinking">
+            thinking<i>.</i>
+            <i>.</i>
+            <i>.</i>
+          </span>
+        ) : (
+          status
+        )}
+      </span>
+      {hand && (
+        <span className="myHand" aria-live="polite">
+          You have: <b>{hand}</b>
+        </span>
+      )}
+    </div>
   );
 }

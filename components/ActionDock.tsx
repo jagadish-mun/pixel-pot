@@ -2,20 +2,21 @@
 
 import { useEffect, useState } from 'react';
 import { ChipFace } from './Pixels';
+import { CHIP_VALUES } from '@/lib/chips';
 import { chips } from '@/lib/client';
 import { awardingSidePot, highBet, legalActions, potOf, usesTurns } from '@/lib/game';
 import type { Action, Party, Player } from '@/lib/types';
 
-const CHIP_VALUES = [1, 5, 25, 100, 500, 1000, 5000, 25000];
-
 /** Four chip sizes that suit this table's blinds. */
 function chipChoices(party: Party): number[] {
   const unit = party.settings.smallBlind || party.settings.bigBlind || 5;
+  // Smallest first, starting at the biggest chip that fits the blind (four of the five chips).
+  const up = [...CHIP_VALUES].reverse();
   let start = 0;
-  CHIP_VALUES.forEach((v, i) => {
+  up.forEach((v, i) => {
     if (v <= unit) start = i;
   });
-  return CHIP_VALUES.slice(start, start + 4);
+  return up.slice(Math.min(start, up.length - 4), Math.min(start, up.length - 4) + 4);
 }
 
 type DockProps = {
@@ -40,7 +41,7 @@ function ChipPicker({ party, value, max, onChange, label }: { party: Party; valu
           aria-label={`Add ${chips(v)} to your bet`}
         >
           <ChipFace value={v} size={36} />
-          <span>+{v >= 1000 ? `${v / 1000}K` : v}</span>
+          <span>+{v}</span>
         </button>
       ))}
       <label className="betField">
@@ -189,11 +190,11 @@ function FreeDock({ party, me, isHost, busy, act, onAward }: DockProps) {
                 aria-label={`Add ${chips(v)} to your bet`}
               >
                 <ChipFace value={v} size={36} />
-                <span>+{v >= 1000 ? `${v / 1000}K` : v}</span>
+                <span>+{v}</span>
               </button>
             ))}
             <button className="chipBtn" disabled={all(bet)} onClick={() => setAmount(me.stack)} aria-label="Bet your whole stack">
-              <ChipFace value={1000} size={36} />
+              <ChipFace value={500} size={36} />
               <span>Max</span>
             </button>
             <label className="betField">

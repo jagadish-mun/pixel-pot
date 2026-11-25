@@ -5,7 +5,7 @@ import ActionDock from '@/components/ActionDock';
 import { JoinDock, RoomScreen } from '@/components/PartyRoom';
 import TableView from '@/components/TableView';
 import { fullDeck, type Card } from '@/lib/cards';
-import { applyAction, createParty, joinParty } from '@/lib/game';
+import { applyAction, createParty, joinParty, legalActions } from '@/lib/game';
 import type { Action, Party, PartyRecord, Settings } from '@/lib/types';
 
 const NAMES = ['Mia', 'Sam', 'Jo', 'Priya', 'Alexandria', 'Kai', 'Bartholomew', 'Lee', 'Noor', 'Ola'];
@@ -33,6 +33,15 @@ function deck(seed: number): Card[] {
 function play(rec: PartyRecord, moves: [string, Action][], seed = 1): Party {
   for (const [who, action] of moves) applyAction(rec, who, action, Date.now(), deck(seed));
   return rec.party;
+}
+
+/** Check or call round the table until the hand reaches `street`. */
+function callTo(rec: PartyRecord, street: 'flop' | 'turn' | 'river') {
+  const order = ['preflop', 'flop', 'turn', 'river'];
+  for (let guard = 0; rec.party.phase === 'live' && order.indexOf(rec.party.street) < order.indexOf(street) && guard < 100; guard++) {
+    const id = rec.party.toActId!;
+    applyAction(rec, id, legalActions(rec.party, id).check ? { type: 'check' } : { type: 'call' }, Date.now());
+  }
 }
 
 type Scene = { title: string; party: Party; meId: string | null; myCards?: Card[] | null };
@@ -190,6 +199,39 @@ function scenes(): Scene[] {
     ['Jo', { type: 'fold' }],
   ]);
   out.push(cardScene('Cards · I won without a showdown (my cards stay private)', foldWin, 'Mia'));
+
+  // The river, with everyone checking or calling their way there.
+  const river = table(6, { mode: 'cards' });
+  applyAction(river, 'Mia', { type: 'start_hand' }, Date.now(), deck(5));
+  callTo(river, 'river');
+  out.push(cardScene('Cards · 6 players · the river', river, 'Mia'));
+
+  // All in with side pots: two short stacks all in preflop, two players left with chips on the flop.
+  const sides = table(4, { mode: 'cards' });
+  applyAction(sides, 'Mia', { type: 'chips', playerId: 'Sam', amount: -900 }, Date.now());
+  applyAction(sides, 'Mia', { type: 'chips', playerId: 'Jo', amount: -700 }, Date.now());
+  applyAction(sides, 'Mia', { type: 'start_hand' }, Date.now(), deck(9));
+  for (let guard = 0; sides.party.street === 'preflop' && guard < 20; guard++) {
+    const id = sides.party.toActId!;
+    const p = sides.party.players.find((x) => x.id === id)!;
+    const legal = legalActions(sides.party, id);
+    applyAction(sides, id, p.stack <= 300 && legal.allin !== null ? { type: 'allin' } : legal.check ? { type: 'check' } : { type: 'call' }, Date.now());
+  }
+  out.push(cardScene('Cards · all in, with side pots', sides, 'Mia'));
+
+  // Stacks of 15, 2,725 and 250,000.
+  const stacks = table(3, { mode: 'cards', smallBlind: 0, bigBlind: 0 });
+  applyAction(stacks, 'Mia', { type: 'chips', playerId: 'Mia', amount: 249_000 }, Date.now());
+  applyAction(stacks, 'Mia', { type: 'chips', playerId: 'Sam', amount: 1725 }, Date.now());
+  applyAction(stacks, 'Mia', { type: 'chips', playerId: 'Jo', amount: -985 }, Date.now());
+  applyAction(stacks, 'Mia', { type: 'start_hand' }, Date.now(), deck(3));
+  out.push(cardScene('Cards · stacks of 250,000 (me), 2,725 and 15', stacks, 'Mia'));
+  const stacksThem = table(3, { mode: 'cards', smallBlind: 0, bigBlind: 0 });
+  applyAction(stacksThem, 'Mia', { type: 'chips', playerId: 'Sam', amount: 249_000 }, Date.now());
+  applyAction(stacksThem, 'Mia', { type: 'chips', playerId: 'Jo', amount: 1725 }, Date.now());
+  applyAction(stacksThem, 'Mia', { type: 'chips', playerId: 'Mia', amount: -985 }, Date.now());
+  applyAction(stacksThem, 'Mia', { type: 'start_hand' }, Date.now(), deck(4));
+  out.push(cardScene('Cards · stacks of 15 (me), 250,000 and 2,725', stacksThem, 'Mia'));
 
   // My turn with my cards showing, at the smallest and biggest tables.
   for (const count of [2, 10]) {

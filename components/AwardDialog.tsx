@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import Dialog from './Dialog';
-import { ChipStack, Face } from './Pixels';
+import { Face } from './Pixels';
+import ChipPile from './scene/ChipPile';
 import { chips } from '@/lib/client';
 import { awardingSidePot, eligibleWinners, potOf } from '@/lib/game';
 import type { Action, Party } from '@/lib/types';
@@ -93,7 +94,7 @@ export default function AwardDialog({
       </ul>
       {note && <p>{note}</p>}
       <div className="row" style={{ justifyContent: 'center', minHeight: 44 }}>
-        <ChipStack amount={slice || pot} scale={3} maxColumns={5} />
+        <ChipPile amount={slice || pot} scale={3} />
       </div>
       <button
         className="btn gold"

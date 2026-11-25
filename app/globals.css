@@ -707,29 +707,6 @@ select.input {
   right: 0;
   bottom: var(--dock-h, 0px);
   left: 0;
-  display: grid;
-  place-items: center;
-  /* Sit on the dock: if the table can't shrink any further, it runs out of room at the top, never under the dock. */
-  align-content: end;
-  container-type: size;
-  /* Room under the oval for "You have: …". */
-  --label-room: 32px;
-}
-
-/* Fit the space, but never so small that the seats pile up. */
-.tvBox .tv {
-  width: max(min(100cqw, 300px), min(100cqw, (100cqh - var(--label-room)) * 5 / 7));
-  margin: 0;
-}
-
-.tvBox .myHand {
-  margin-top: 4px;
-}
-
-@media (orientation: landscape) {
-  .tvBox .tv {
-    width: max(min(100cqw, 480px), min(100cqw, (100cqh - var(--label-room)) * 16 / 9.5, 1200px));
-  }
 }
 
 /*
@@ -741,13 +718,9 @@ select.input {
   --hud-room: 0px;
 }
 
-.stage:has(.betPresets) .tvBox {
-  --label-room: 0px;
-}
-
 .stage:has(.betPresets) .turnBanner,
 .stage:has(.betPresets) .hud,
-.stage:has(.betPresets) .tvBox .myHand {
+.stage:has(.betPresets) .myHand {
   display: none;
 }
 
@@ -917,81 +890,11 @@ select.input {
   }
 }
 
-.tv {
-  /* How far seat centres sit in from the table's edges, and how much further in each bet sits. */
-  --edge-x: 40px;
-  --edge-y: 50px;
-  position: relative;
-  /* Full width, but never so tall that the oval runs off a short screen. */
-  width: min(100%, calc(72dvh * 5 / 7));
-  aspect-ratio: 5 / 7;
-  margin: 12px auto 0;
-}
-
-.tvFelt {
-  position: absolute;
-  inset: 28px 20px;
-  border-radius: 50%;
-  background-color: var(--felt);
-  background-image: repeating-conic-gradient(var(--felt-dk) 0% 25%, transparent 0% 50%);
-  background-size: 8px 8px;
-  box-shadow:
-    0 0 0 var(--px) var(--ink),
-    0 0 0 calc(var(--px) * 3) #8a5a34,
-    0 0 0 calc(var(--px) * 4) #6b4326,
-    0 0 0 calc(var(--px) * 5) var(--ink),
-    inset 0 0 0 var(--px) var(--felt-lt);
-}
-
-.tvCentre {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  z-index: 1;
-  width: 40%;
-  transform: translate(-50%, -50%);
-  display: grid;
-  justify-items: center;
-  gap: 10px;
-  text-align: center;
-}
-
-.tvBoard {
-  display: flex;
-  gap: 2px;
-}
-
 .cardSlot {
   position: relative;
   display: inline-grid;
   place-items: center;
   flex: none;
-}
-
-.tvBoard .cardSlot {
-  width: 17px;
-  height: 24px;
-}
-
-.cardSlot.empty {
-  background: rgba(12, 9, 22, 0.22);
-  box-shadow: inset 0 0 0 2px rgba(223, 245, 233, 0.3);
-}
-
-/* Cardless: the street has been dealt at the real table. */
-.cardSlot.empty[data-dealt='true'] {
-  background: var(--bone);
-  box-shadow:
-    inset 0 0 0 2px var(--ink),
-    2px 2px 0 0 var(--ink);
-}
-
-.cardSlot small {
-  font-family: var(--display);
-  font-size: 6px;
-  color: var(--felt-dk);
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
 }
 
 .cardSlot.face {
@@ -1017,34 +920,9 @@ select.input {
 }
 
 /* Card tables need a readable board. */
-.tv[data-cards='true'] .tvBoard .cardSlot {
-  width: 22px;
-  height: 31px;
-}
-
 .faceCards {
   display: flex;
   gap: 2px;
-}
-
-.tvCards {
-  width: auto;
-  min-width: 44px;
-  height: auto;
-  padding: 2px 4px;
-  margin: 0 0 2px;
-}
-
-/* A seat showing face-up cards grows to fit them. */
-.tvSeat:has(.tvCards) {
-  width: auto;
-  min-width: 78px;
-}
-
-.tvSeat[data-won='true'] {
-  box-shadow:
-    0 0 0 var(--px) var(--gold),
-    0 0 0 calc(var(--px) * 2) var(--ink);
 }
 
 .myHand {
@@ -1058,50 +936,6 @@ select.input {
   font-size: 11px;
   font-weight: 400;
   color: var(--gold);
-}
-
-.tvPot {
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-}
-
-.tvPotAmount {
-  font-family: var(--display);
-  font-size: 20px;
-  line-height: 1;
-  color: var(--gold);
-  text-shadow: 3px 3px 0 var(--ink);
-}
-
-.tvPotLine {
-  font-size: 15px;
-  line-height: 1.15;
-  color: #dff5e9;
-}
-
-.tvSidePots {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 2px 8px;
-  font-family: var(--display);
-  font-size: 8px;
-  line-height: 1.6;
-  color: #dff5e9;
-}
-
-.tvCentre .lobby {
-  gap: 8px;
-  padding: 0;
-}
-
-.tvCentre .lobbyCode {
-  font-size: clamp(22px, 7vw, 36px);
-}
-
-.tvCentre .potLabel {
-  font-size: 15px;
 }
 
 .dealPrompt {
@@ -1135,63 +969,140 @@ select.input {
   margin-bottom: 4px;
 }
 
-.tvSeats {
+/* ---------- the table scene: a pixel-art canvas, with labels over it ---------- */
+
+.scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.sceneCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  image-rendering: pixelated;
+}
+
+.chipPile {
+  image-rendering: pixelated;
+}
+
+.sceneSeats {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
-/* Seats and bets are placed with --sx/--sy (portrait) or --wx/--wy (landscape), from -1 to 1. */
-.tvSeat,
-.tvBet {
+/* A name plate above each opponent's head (mine sits at the bottom left). */
+.plate {
   position: absolute;
-  left: calc(50% + var(--sx) * (50% - var(--edge-x)));
-  top: calc(50% + var(--sy) * (50% - var(--edge-y)));
-  transform: translate(-50%, -50%);
-}
-
-.tvBet {
-  left: calc(50% + var(--sx) * (50% - var(--edge-x)) - var(--tbx));
-  top: calc(50% + var(--sy) * (50% - var(--edge-y)) - var(--tby));
-}
-
-.tvSeat {
   z-index: 2;
   display: grid;
   justify-items: center;
-  width: 78px;
-  padding: 2px 2px 4px;
-  background: var(--panel);
-  box-shadow: 0 0 0 var(--px) var(--ink);
+  gap: 1px;
+  max-width: 84px;
+  margin-top: -3px;
+  padding: 2px 4px 3px;
+  transform: translate(-50%, -100%);
+  background: rgba(26, 20, 41, 0.88);
+  box-shadow: 0 0 0 2px var(--ink);
   text-align: center;
 }
 
-.tvSeat[data-me='true'] {
-  background: var(--panel-hi);
+.plate[data-me='true'] {
+  top: auto;
+  bottom: 6px;
+  left: 8px;
+  margin: 0;
+  transform: none;
 }
 
-.tvSeat[data-out='true'] > :not(.tvTags) {
-  opacity: 0.45;
+.plate[data-out='true'] > .plateName {
+  opacity: 0.5;
 }
 
-/* Whose turn it is: a gold, pulsing seat with a pointer above it. */
-.tvSeat[data-turn='true'] {
-  z-index: 3;
+.plate[data-turn='true'] {
   background: #4a3a14;
   box-shadow:
-    0 0 0 var(--px) var(--gold),
-    0 0 0 calc(var(--px) * 2) var(--ink),
-    0 0 20px 8px rgba(245, 184, 61, 0.55);
-  animation: seatGlow 1s steps(2) infinite;
+    0 0 0 2px var(--gold),
+    0 0 0 4px var(--ink);
 }
 
-@keyframes seatGlow {
-  50% {
-    box-shadow:
-      0 0 0 var(--px) var(--gold),
-      0 0 0 calc(var(--px) * 2) var(--ink),
-      0 0 8px 2px rgba(245, 184, 61, 0.25);
-  }
+.plate[data-won='true'] {
+  box-shadow:
+    0 0 0 2px var(--gold),
+    0 0 0 4px var(--ink),
+    0 0 14px 4px rgba(245, 184, 61, 0.5);
+}
+
+/* A plate lifted clear of a neighbour keeps a thin stem down to its head. */
+.plate:not([data-me='true'])::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 2px;
+  height: var(--lift, 0px);
+  background: rgba(223, 245, 233, 0.35);
+}
+
+.plate[data-compact='true'] {
+  max-width: 64px;
+  padding: 1px 3px 2px;
+}
+
+.plate[data-compact='true'] .plateName {
+  max-width: 58px;
+  font-size: 11px;
+}
+
+.plateStack {
+  font-family: var(--display);
+  font-size: 7px;
+  line-height: 1.4;
+  color: var(--gold);
+}
+
+.plateName {
+  max-width: 76px;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.1;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.plateTags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.plateTags:empty {
+  display: none;
+}
+
+.plateTags .tag {
+  padding: 1px 3px;
+  font-size: 7px;
+}
+
+/* The turn arrow, with the countdown ring round it, above the plate. */
+.turnArrow {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  width: 22px;
+  height: 22px;
+  transform: translateX(-50%);
+}
+
+.turnArrow .tvPointer {
+  top: 5px;
 }
 
 .tvPointer {
@@ -1214,15 +1125,6 @@ select.input {
   }
 }
 
-.tvFace {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  margin: -4px 0 -2px;
-}
-
 .timerRing {
   position: absolute;
   inset: 0;
@@ -1230,143 +1132,140 @@ select.input {
   height: 100%;
 }
 
-.holeCards {
+/* Chip totals beside each stack and bet. */
+.chipLabel {
   position: absolute;
-  top: -8px;
-  right: -6px;
-  display: flex;
-}
-
-.holeCards .cardSlot:nth-child(odd) {
-  transform: rotate(-8deg);
-}
-
-.holeCards .cardSlot:nth-child(even) {
-  transform: rotate(8deg);
-}
-
-.holeCards .cardSlot + .cardSlot {
-  margin-left: -5px;
-}
-
-.tvName {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 15px;
-  line-height: 1.1;
-}
-
-.tvStack {
+  z-index: 1;
+  padding-left: 2px;
+  transform: translateY(-100%);
   font-family: var(--display);
-  font-size: 9px;
-  line-height: 1.5;
+  font-size: 8px;
+  line-height: 1.4;
+  color: #fff;
+  white-space: nowrap;
+  pointer-events: none;
+  text-shadow:
+    1px 1px 0 var(--ink),
+    -1px -1px 0 var(--ink),
+    1px -1px 0 var(--ink),
+    -1px 1px 0 var(--ink);
+}
+
+.chipLabel small {
+  margin-left: 3px;
+  font-size: 7px;
+  color: var(--dim);
+}
+
+.chipLabel[data-me='true'] {
+  padding: 0 2px 0 0;
+  transform: translate(-100%, -100%);
+  font-size: 10px;
   color: var(--gold);
 }
 
-.tvTags {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 2px;
-  min-height: 13px;
-  font-size: 13px;
-  line-height: 1;
+.chipLabel.bet {
+  color: #dff5e9;
 }
 
-.tvTags .tag {
-  padding: 1px 3px;
-  font-size: 7px;
-}
-
-.tvBet {
+.potLabel3d {
+  position: absolute;
   z-index: 1;
   display: grid;
-  justify-items: center;
-  gap: 2px;
+  gap: 1px;
+  transform: translateY(-6px);
+  pointer-events: none;
+  text-shadow: 2px 2px 0 var(--ink);
+}
+
+.potLabel3d b {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--gold);
+}
+
+.potLabel3d > span {
+  max-width: 120px;
+  font-size: 12px;
+  line-height: 1.1;
+  color: #dff5e9;
+}
+
+.potLabel3d .sidePots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
   font-family: var(--display);
   font-size: 7px;
-  color: #fff;
+  line-height: 1.6;
+}
+
+/* The lobby or a deal prompt, in the middle of the felt. */
+.sceneCentre {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  justify-items: center;
+  max-width: 70%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+}
+
+.sceneCentre .lobby {
+  gap: 8px;
+  padding: 0;
   text-shadow: 2px 2px 0 var(--ink);
-  transition:
-    left 0.4s steps(4),
-    top 0.4s steps(4),
-    opacity 0.4s steps(4);
 }
 
-/* End of a street: the chips slide into the pot. */
-.tvBet[data-sweep='true'] {
-  left: 50%;
-  top: 50%;
-  opacity: 0;
+.sceneCentre .lobbyCode {
+  font-size: clamp(22px, 7vw, 36px);
 }
 
-/* Landscape phones and desktops: a wide oval. */
-@media (orientation: landscape) {
-  .tv {
-    --edge-x: 60px;
-    --edge-y: 50px;
-    width: 100%;
-    aspect-ratio: 16 / 9.5;
-  }
-
-  .tvFelt {
-    inset: 30px 34px;
-  }
-
-  .tvSeat {
-    left: calc(50% + var(--wx) * (50% - var(--edge-x)));
-    top: calc(50% + var(--wy) * (50% - var(--edge-y)));
-  }
-
-  .tvBet {
-    left: calc(50% + var(--wx) * (50% - var(--edge-x)) - var(--wbx));
-    top: calc(50% + var(--wy) * (50% - var(--edge-y)) - var(--wby));
-  }
-
-  .tvSeat {
-    width: 96px;
-  }
-
-  .tvCentre {
-    width: 36%;
-  }
-
-  .tvBoard .cardSlot {
-    width: 32px;
-    height: 45px;
-  }
-
-  .tv[data-cards='true'] .tvBoard .cardSlot {
-    width: 36px;
-    height: 50px;
-  }
+/* The cardless deal prompt, small enough for a phone's table. */
+.sceneCentre .dealPrompt {
+  gap: 3px;
+  max-width: 168px;
+  padding: 6px 8px;
 }
 
-/* Seven or more players: smaller seats so the middle of the table stays clear. */
-.tv[data-crowd='true'] .tvSeat {
-  width: 64px;
+.sceneCentre .dealTitle {
+  font-size: 9px;
 }
 
-.tv[data-crowd='true'] .tvName {
-  font-size: 13px;
+.sceneCentre .dealPrompt > p:not(.dealTitle) {
+  font-size: 12px;
 }
 
-.tv[data-crowd='true'] .tvFace {
-  width: 36px;
-  height: 36px;
+.sceneCentre .dealPrompt .btn {
+  min-height: 36px;
+  margin: 2px 0;
+  padding: 4px 10px;
+  font-size: 10px;
 }
 
-.tv[data-crowd='true'] .tvFace .face {
-  width: 22px;
-  height: 22px;
+/* My own cards, big, standing at the near rail. */
+.myCards {
+  position: absolute;
+  z-index: 3;
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  margin-top: -4px;
+  transform: translate(-50%, -100%);
 }
 
-/* Face-up cards keep their own size, so they don't spill over the name. */
-.tv[data-crowd='true'] .tvFace.tvCards {
-  width: auto;
-  height: auto;
+.plate .myHand {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+/* Mine stays left of my cards: the hand name wraps rather than running under them. */
+.plate[data-me='true'] {
+  max-width: min(44%, 260px);
+  justify-items: start;
+  text-align: left;
 }
 
 .muteBtn {
@@ -1482,87 +1381,27 @@ select.input {
   }
 
   .tvBox {
-    /* A little room so the top seat's card badges aren't clipped. */
-    top: 10px;
+    top: 4px;
     right: var(--dock-w, 0px);
-    bottom: 6px;
-    --label-room: 0px;
+    bottom: 0;
   }
 
-  /* "You have: …" goes in the right column, just above the dock. */
-  .tvBox .myHand {
-    position: absolute;
-    bottom: calc(var(--dock-h) + 2px);
-    left: calc(100% + 12px);
-    width: calc(var(--dock-w) - 24px);
-    margin: 0;
-    text-align: left;
-  }
-
-  /* Seats a little nearer the top and bottom edges, so their bets stay clear of the middle. */
-  .tv {
-    --edge-y: 42px;
-  }
-
-  /* Slightly smaller bet stacks, centred where they were. */
-  .tvBet {
-    scale: 0.85;
-  }
-
-  /* Two recent moves here, to leave room for "You have: …" above the dock. */
+  /* Two recent moves, to keep the right-hand column short. */
   .feed li:nth-child(3) {
     display: none;
   }
 
-  /* A short centre, so the bets above and below it have room: no chip pile in the pot, just the amount. */
-  .tvCentre {
-    gap: 4px;
-  }
-
-  .tvPot {
-    gap: 2px;
-  }
-
-  .tvPot > :not(p) {
-    display: none;
-  }
-
-  .tvPotAmount {
-    font-size: 16px;
-  }
-
-  .tvPotLine {
-    font-size: 12px;
-  }
-
-  /* 7+ players: just the amount in the middle (the feed says who won the last pot). */
-  .tv[data-crowd='true'] .tvPotLine {
-    display: none;
-  }
-
   /* A compact lobby. The table code in the top bar opens the invite, so no button here. */
-  .tvCentre .lobby {
+  .sceneCentre .lobby {
     gap: 4px;
-    padding: 0;
   }
 
-  .tvCentre .lobbyCode {
+  .sceneCentre .lobbyCode {
     font-size: 28px;
   }
 
-  .tvCentre .lobby .btn {
+  .sceneCentre .lobby .btn {
     display: none;
-  }
-
-  /* The phone-size board, not the big landscape one. */
-  .tvBoard .cardSlot {
-    width: 17px;
-    height: 24px;
-  }
-
-  .tv[data-cards='true'] .tvBoard .cardSlot {
-    width: 24px;
-    height: 34px;
   }
 }
 
@@ -2068,4 +1907,9 @@ select.input {
 .devScene {
   display: grid;
   gap: 4px;
+}
+
+.devScene .scene {
+  position: relative;
+  height: 420px;
 }

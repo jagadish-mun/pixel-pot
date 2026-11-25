@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
-import { ChipStack } from '@/components/Pixels';
+import ChipPile from '@/components/scene/ChipPile';
 import { api } from '@/lib/client';
 import { CODE_LENGTH, normalizeCode } from '@/lib/game';
 
@@ -34,9 +34,9 @@ export default function Home() {
     <main className="home">
       <header className="hero">
         <div className="heroChips" aria-hidden="true">
-          <ChipStack amount={700} scale={4} maxColumns={1} />
-          <ChipStack amount={9000} scale={4} maxColumns={1} />
-          <ChipStack amount={30} scale={4} maxColumns={1} />
+          <ChipPile amount={30} scale={4} maxTowers={1} />
+          <ChipPile amount={2500} scale={4} maxTowers={1} />
+          <ChipPile amount={300} scale={4} maxTowers={1} />
         </div>
         <h1 className="wordmark">Pixel Pot</h1>
         <p className="tagline">Deal real cards at the table. Keep the chips on your phones.</p>
