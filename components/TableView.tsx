@@ -1,14 +1,14 @@
 'use client';
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import { FaceCards } from './Cards';
-import { faceColor } from './Pixels';
-import { DEAL_MS, SWEEP_MS, drawScene, seatAnchors, type Motion, type SceneData } from './scene/draw';
-import { BET_INSET, POT_SPOT, arrangeSeats, onFelt } from './scene/layout';
-import { TABLE_R, fitCamera, project, type Camera } from './scene/project';
+import { DEAL_MS, FLIP_MS, FOLD_MS, SWEEP_MS, drawScene, handsBox, personAt, seatAnchors, type Motion, type SceneData } from './scene/draw';
+import { handsSize, myCardWidth } from './scene/hands';
+import { BET_INSET, POT_SPOT, arrangeSeats, onFelt, spots } from './scene/layout';
+import { idle, poseOf } from './scene/people';
+import { fitCamera, project, type Camera } from './scene/project';
 import { chipTowers } from '@/lib/chips';
 import { chips, signed } from '@/lib/client';
-import type { Card } from '@/lib/cards';
+import { cardText, type Card } from '@/lib/cards';
 import { potOf, potsOf, usesTurns } from '@/lib/game';
 import { bestHand } from '@/lib/hand';
 import type { Action, Party, Player, Street } from '@/lib/types';
@@ -110,6 +110,9 @@ function useReducedMotion(): boolean {
   return still;
 }
 
+/** Idle motion switched off (reduced motion). */
+const STILL = { bob: 0, blink: false, tilt: false };
+
 /** Room kept free round the table for the DOM labels, in CSS pixels. */
 const MARGIN = { top: 50, side: 10, bottom: 2 };
 const MY_STRIP = 64;
@@ -137,20 +140,22 @@ export default function TableView({
   const canvas = useRef<HTMLCanvasElement>(null);
   const size = useCanvasSize(box);
   const still = useReducedMotion();
-  const cam: Camera | null = useMemo(
-    () => {
-      if (!size) return null;
-      // Tall screens have height to spare: my plate and cards get a strip below the near rail.
-      const bottom = size.h > size.w * 1.05 ? MY_STRIP : MARGIN.bottom;
-      return fitCamera(size.w, size.h, { top: MARGIN.top / size.q, side: MARGIN.side / size.q, bottom: bottom / size.q });
-    },
-    [size],
-  );
-
   const turns = usesTurns(party);
   const playing = party.phase !== 'idle';
   const cardsMode = party.settings.mode === 'cards';
   const omaha = party.settings.variant === 'omaha';
+  const holeCount = omaha ? 4 : 2;
+  const me = party.players.find((p) => p.id === meId);
+
+  // My hands, first person, need room at the bottom; on tall screens there's a strip below the rail too.
+  const cw = size ? myCardWidth(size.w, size.q) : 0;
+  const handsH = me ? handsSize(cw, holeCount).h : 0;
+  const cam: Camera | null = useMemo(() => {
+    if (!size) return null;
+    const strip = size.h > size.w * 1.05 ? MY_STRIP / size.q : 0;
+    const bottom = Math.max(MARGIN.bottom / size.q, strip, handsH * 0.55);
+    return fitCamera(size.w, size.h, { top: MARGIN.top / size.q, side: MARGIN.side / size.q, bottom });
+  }, [size, handsH]);
 
   // I sit at the near side. Spectators see the table from the host's chair.
   let meIndex = party.players.findIndex((p) => p.id === meId);
@@ -180,70 +185,131 @@ export default function TableView({
   const board: SceneData['board'] = Array.from({ length: 5 }, (_, i) =>
     cardsMode ? (i < visible ? party.board[i] : null) : i < dealt ? 'back' : null,
   );
-  const me = party.players.find((p) => p.id === meId);
   const myHand =
     cardsMode && myCards?.length && playing && me?.inHand && !me.folded ? bestHand(myCards, party.board.slice(0, visible), party.settings.variant).name : null;
-  const faceUp = (p: Player): Card[] | null => {
-    if (revealed && party.shown[p.id]) return party.shown[p.id];
-    if (p.id === meId && myCards?.length) return myCards;
-    return null;
-  };
   const actingId = turns && party.phase === 'live' && !party.awaitingDeal ? party.toActId : null;
+  const shownOf = (p: Player): Card[] | null => (revealed && party.shown[p.id] ? party.shown[p.id] : null);
+
+  // Holding my cards up, lowered flat while I hide them (tap and hold, or hold Space), or resting on the rail.
+  const [peek, setPeek] = useState(false);
+  const holding = Boolean(me && cardsMode && myCards?.length && playing && me.inHand && !me.folded);
+  const hands: SceneData['hands'] = me
+    ? { mode: holding ? (peek ? 'lowered' : 'hold') : 'rest', cards: holding ? myCards! : [], count: holeCount, cw }
+    : null;
+  useEffect(() => {
+    if (!holding) return;
+    const typing = (e: KeyboardEvent) => e.target instanceof HTMLElement && e.target.closest('input, textarea, select, button, [contenteditable]');
+    const down = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat && !typing(e)) {
+        e.preventDefault();
+        setPeek(true);
+      }
+    };
+    const up = (e: KeyboardEvent) => e.code === 'Space' && setPeek(false);
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+    };
+  }, [holding]);
+
+  // My chips sit on the felt just above my hands, between them and the middle.
+  const myZ = useMemo(() => {
+    if (!cam || !hands) return -0.42;
+    const top = cam.h - handsH - 3;
+    for (let z = -0.5; z < -0.22; z += 0.01) if (project(cam, 0, 0, z).y <= top) return z;
+    return -0.22;
+  }, [cam, hands, handsH]);
 
   const data: SceneData = {
-    seats: seats.map(({ player: p, seat, me: mine }) => ({
-      seat,
-      me: mine,
-      color: faceColor(p.id + p.name),
-      dim: playing ? !p.inHand || p.folded : p.stack === 0,
-      cards: playing && p.inHand && !p.folded && !faceUp(p) ? (omaha ? 4 : 2) : 0,
-      stack: p.stack,
-      bet: inFront(party, p),
-      acting: p.id === actingId,
-    })),
+    seats: seats.map(({ player: p, seat, me: mine }) => {
+      const shown = mine ? null : shownOf(p);
+      const pose = poseOf(party, p, { acting: p.id === actingId, showing: Boolean(shown) });
+      return {
+        id: p.id,
+        seat,
+        me: mine,
+        seed: p.id + p.name,
+        robot: Boolean(p.bot),
+        pose,
+        held: pose === 'hold' || pose === 'think' ? holeCount : 0,
+        shown,
+        stack: p.stack,
+        bet: inFront(party, p),
+        acting: p.id === actingId,
+      };
+    }),
     board,
     winning,
     pot: Math.max(0, middle),
     dealerSeat: seats.find((s) => s.player.id === party.dealerId)?.seat ?? null,
+    hands,
+    myZ,
   };
 
-  /* ---------- motion: new board cards are dealt in; bets slide into the pot ---------- */
-  const motion = useRef<Motion>({ dealt: new Map(), sweeps: [] });
-  const seen = useRef<{ hand: number; board: number; bets: Map<string, number> } | null>(null);
+  /* ---------- motion: cards dealt in, bets slid into the pot, folds tossed, shown cards turned over ---------- */
+  const motion = useRef<Motion>({ dealt: new Map(), sweeps: [], folds: [], shown: new Map() });
+  const seen = useRef<{ hand: number; board: number; bets: Map<string, number>; folded: Set<string>; shown: Set<string> } | null>(null);
   const boardCount = board.filter(Boolean).length;
   const betKey = party.players.map((p) => `${p.id}:${inFront(party, p)}`).join(',');
+  const foldKey = party.players.filter((p) => p.folded).map((p) => p.id).join(',');
+  const shownKey = revealed ? Object.keys(party.shown).join(',') : '';
+  const latest = useRef({ data, cam });
+  latest.current = { data, cam };
   useEffect(() => {
     const now = performance.now();
     const before = seen.current;
     const bets = new Map(party.players.map((p) => [p.id, inFront(party, p)]));
-    seen.current = { hand: party.handNo, board: boardCount, bets };
-    if (!before || still) return;
+    const folded = new Set(foldKey ? foldKey.split(',') : []);
+    const shown = new Set(shownKey ? shownKey.split(',') : []);
+    seen.current = { hand: party.handNo, board: boardCount, bets, folded, shown };
+    const c = latest.current.cam;
+    if (!before || still || !c) return;
+    const m = motion.current;
     if (before.hand !== party.handNo) {
-      motion.current = { dealt: new Map(), sweeps: [] };
+      motion.current = { dealt: new Map(), sweeps: [], folds: [], shown: new Map() };
       return;
     }
-    for (let i = before.board; i < boardCount; i++) motion.current.dealt.set(i, now + (i - before.board) * 160);
-    for (const { player: p, seat } of arrangeSeats(party.players, meIndex)) {
+    for (let i = before.board; i < boardCount; i++) m.dealt.set(i, now + (i - before.board) * 160);
+    for (const { player: p, seat, me: mine } of arrangeSeats(party.players, meIndex)) {
       const was = before.bets.get(p.id) ?? 0;
-      if (was > 0 && (bets.get(p.id) ?? 0) === 0) motion.current.sweeps.push({ from: onFelt(seat, BET_INSET), amount: was, start: now });
+      if (was > 0 && (bets.get(p.id) ?? 0) === 0) m.sweeps.push({ from: mine ? spots(seat, true, myZ).bet : onFelt(seat, BET_INSET), amount: was, start: now });
+      if (folded.has(p.id) && !before.folded.has(p.id)) {
+        if (mine) {
+          const hb = latest.current.data.hands;
+          if (hb) {
+            const box = handsBox(c, hb);
+            m.folds.push({ from: { x: box.x + box.w / 2, y: box.y + box.h * 0.35 }, count: holeCount, start: now, size: hb.cw });
+          }
+        } else {
+          const person = personAt(c, seat);
+          m.folds.push({ from: { x: person.x, y: person.y - person.height * 0.35 }, count: holeCount, start: now, size: Math.max(4, Math.round(person.height * 0.2)) });
+        }
+      }
+      if (shown.has(p.id) && !before.shown.has(p.id)) m.shown.set(p.id, now);
     }
-    // Only when the hand, the board or the bets change.
+    // Only when the hand, the board, the bets, the folds or the shown hands change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [party.handNo, boardCount, betKey]);
+  }, [party.handNo, boardCount, betKey, foldKey, shownKey]);
 
   /* ---------- drawing: ~12 frames a second, paused while the tab is hidden; one still frame with reduced motion ---------- */
-  const latest = useRef({ data, cam });
-  latest.current = { data, cam };
-  const paint = useRef((now: number) => {
+  const paint = useRef((now: number, moving: boolean) => {
     const ctx = canvas.current?.getContext('2d');
     const { data: d, cam: c } = latest.current;
     if (!ctx || !c) return;
     const m = motion.current;
     m.sweeps = m.sweeps.filter((s) => now - s.start < SWEEP_MS);
+    m.folds = m.folds.filter((f) => now - f.start < FOLD_MS);
     for (const [i, t] of m.dealt) if (now - t > DEAL_MS) m.dealt.delete(i);
+    for (const [id, t] of m.shown) if (now - t > FLIP_MS) m.shown.delete(id);
     // Chips still sliding in aren't in the pot yet.
     const sliding = m.sweeps.reduce((sum, s) => sum + s.amount, 0);
-    drawScene(ctx, c, { ...d, pot: Math.max(0, d.pot - sliding) }, m, now);
+    const started = performance.now();
+    drawScene(ctx, c, { ...d, pot: Math.max(0, d.pot - sliding) }, m, now, moving ? (seed) => idle(seed, now) : () => STILL);
+    // /dev/table shows how long frames take.
+    const stats = (window as { __sceneStats?: number[] }).__sceneStats;
+    if (stats) stats.push(performance.now() - started);
   });
   useEffect(() => {
     if (!cam || still) return;
@@ -253,7 +319,7 @@ export default function TableView({
       frame = requestAnimationFrame(loop);
       if (now - last < 1000 / 12) return;
       last = now;
-      paint.current(now);
+      paint.current(now, true);
     };
     const start = () => {
       cancelAnimationFrame(frame);
@@ -268,7 +334,7 @@ export default function TableView({
   }, [cam, still]);
   // Reduced motion: no loop, just a fresh still frame whenever something changes.
   useEffect(() => {
-    if (cam && still) paint.current(performance.now());
+    if (cam && still) paint.current(performance.now(), false);
   });
 
   /* ---------- DOM labels over the canvas ---------- */
@@ -277,12 +343,12 @@ export default function TableView({
   const lobbyNow = Boolean(lobby) && !playing && party.handNo === 0;
   const dealer = party.players.find((p) => p.id === party.dealerId);
   const canDeal = Boolean(meId && (meId === party.dealerId || meId === party.hostId));
-  const mine = me ? faceUp(me) : null;
+  const handsAt = cam && hands ? handsBox(cam, hands) : null;
 
   // Where each seat's labels go, in CSS pixels.
   const anchors = cam
     ? seats.map(({ player: p, seat, me: isMe }) => {
-        const a = seatAnchors(cam, { seat, me: isMe, stack: p.stack, bet: inFront(party, p) });
+        const a = seatAnchors(cam, { seat, me: isMe, stack: p.stack, bet: inFront(party, p) }, myZ);
         const x = Math.min(Math.max(a.head.x * q, PLATE_HALF), cam.w * q - PLATE_HALF);
         return { ...a, plate: { x, y: a.head.y * q, lift: 0 }, stackAt: { x: a.stack.x * q, y: a.stack.bottom * q } };
       })
@@ -300,7 +366,8 @@ export default function TableView({
     .sort((m, n) => m.a.plate.x - n.a.plate.x)
     .forEach(({ a }) => {
       const clash = () => placed.some((o) => Math.abs(o.x - a.plate.x) < PLATE.w && Math.abs(o.y - (a.plate.y - a.plate.lift)) < PLATE.h);
-      while (clash() && a.plate.lift < PLATE.h * 3) a.plate.lift += PLATE.h;
+      // Lift a plate's height at a time, but never off the top of the scene.
+      while (clash() && a.plate.lift < PLATE.h * 3 && a.plate.y - a.plate.lift - PLATE.h * 2 >= 0) a.plate.lift += PLATE.h;
       placed.push({ x: a.plate.x, y: a.plate.y - a.plate.lift });
     });
 
@@ -317,10 +384,10 @@ export default function TableView({
               const a = anchors[k];
               const acting = p.id === actingId;
               const stackOnPlate = crowded && !isMe;
-              const shown = isMe ? null : faceUp(p);
+              const shown = isMe ? null : shownOf(p);
               const { undrawn } = chipTowers(p.stack);
               return (
-                <li key={p.id} className="seatGroup" aria-label={seatLabel(party, p, acting)}>
+                <li key={p.id} className="seatGroup" aria-label={seatLabel(party, p, acting, shown)}>
                   <Plate
                     party={party}
                     p={p}
@@ -328,12 +395,9 @@ export default function TableView({
                     me={isMe}
                     won={winners.some((r) => r.id === p.id)}
                     style={isMe ? undefined : ({ left: Math.round(a.plate.x), top: Math.round(a.plate.y - a.plate.lift), '--lift': `${a.plate.lift}px` } as CSSProperties)}
-                    hand={isMe ? myHand : null}
                     stack={stackOnPlate && p.stack > 0 ? chips(p.stack) : null}
                     compact={crowded}
-                  >
-                    {shown && <FaceCards cards={shown} width={omaha ? 13 : 18} winning={winning} flip />}
-                  </Plate>
+                  />
                   {p.stack > 0 && !stackOnPlate && (
                     <span className="chipLabel" data-me={isMe} style={at(isMe ? 2 * a.stack.x - a.stack.right : a.stack.right, a.stack.bottom)} aria-hidden="true">
                       {chips(p.stack)}
@@ -350,11 +414,28 @@ export default function TableView({
             })}
           </ul>
 
-          {/* My own cards, big, at the near rail. */}
-          {mine && (
-            <div className="myCards" style={at(project(cam, 0.36, 0, -TABLE_R).x, cam.h)}>
-              <FaceCards cards={mine} width={omaha ? 24 : 32} winning={winning} />
-            </div>
+          {/* My hands: "You have" just above them; press and hold the cards (or Space) to lower them. */}
+          {handsAt && myHand && (
+            <p className="myHand handsLabel" style={at(handsAt.x + handsAt.w / 2, handsAt.y)} aria-live="polite">
+              You have: <b>{myHand}</b>
+            </p>
+          )}
+          {handsAt && holding && (
+            <button
+              type="button"
+              className="peekArea"
+              style={{ ...at(handsAt.x, handsAt.y), width: Math.round(handsAt.w * q), height: Math.round(handsAt.h * q) }}
+              aria-pressed={peek}
+              aria-label={`Your cards: ${myCards!.map(cardText).join(', ')}. Press and hold to lower them.`}
+              onPointerDown={(e) => {
+                e.currentTarget.setPointerCapture(e.pointerId);
+                setPeek(true);
+              }}
+              onPointerUp={() => setPeek(false)}
+              onPointerCancel={() => setPeek(false)}
+              onLostPointerCapture={() => setPeek(false)}
+              onContextMenu={(e) => e.preventDefault()}
+            />
           )}
 
           {/* The middle of the felt: the lobby, a deal prompt, or the pot's total. */}
@@ -410,10 +491,11 @@ function roles(party: Party, p: Player): [string, string, string][] {
   ].filter(Boolean) as [string, string, string][];
 }
 
-function seatLabel(party: Party, p: Player, acting: boolean): string {
+function seatLabel(party: Party, p: Player, acting: boolean, shown: Card[] | null): string {
   const playing = party.phase !== 'idle';
   return [
     p.name,
+    shown && `shows ${shown.map(cardText).join(' ')}`,
     `${chips(p.stack)} chips`,
     ...(playing ? roles(party, p).map((r) => r[2]) : []),
     acting && 'to act',
@@ -432,10 +514,8 @@ function Plate({
   me,
   won,
   style,
-  hand,
   stack,
   compact,
-  children,
 }: {
   party: Party;
   p: Player;
@@ -443,12 +523,9 @@ function Plate({
   me: boolean;
   won: boolean;
   style?: CSSProperties;
-  /** My best hand so far ("Pair of Queens"), on my own plate. */
-  hand?: string | null;
   /** The stack total, when the table is too crowded to label it by the chips. */
   stack?: string | null;
   compact?: boolean;
-  children?: ReactNode;
 }) {
   const playing = party.phase !== 'idle';
   let status: ReactNode = null;
@@ -481,7 +558,6 @@ function Plate({
           <span className="tvPointer" />
         </span>
       )}
-      {children}
       <span className="plateName">
         {p.bot && (
           <span className="tag botTag" title={`Computer player (${p.bot.level})`}>
@@ -508,11 +584,6 @@ function Plate({
           status
         )}
       </span>
-      {hand && (
-        <span className="myHand" aria-live="polite">
-          You have: <b>{hand}</b>
-        </span>
-      )}
     </div>
   );
 }

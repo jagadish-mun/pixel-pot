@@ -17,9 +17,8 @@ export const RAIL_W = 0.1;
 export const RAIL_H = 0.035;
 /** Opponents sit this far outside the rail. */
 export const SEAT_GAP = 0.2;
-/** Placeholder body and head heights above the felt. */
-export const BODY_H = 0.2;
-export const HEAD_H = 0.3;
+/** How tall a seated opponent stands above the rail (their sprite scales from this with distance). */
+export const PERSON_H = 0.46;
 
 /** The camera circles the point it looks at, this far away: about my eyes, sitting at the near side. */
 const EYE_DISTANCE = 1.9;
@@ -108,14 +107,20 @@ export function project(cam: Pick<Camera, 'eyeY' | 'eyeZ' | 'cos' | 'sin' | 'f' 
   return { x: cam.cx + x * s, y: cam.cy - up * s, s };
 }
 
-/** Points that must be on screen: the table and every place an opponent can sit, up to the top of their head. */
-function fitPoints(): { x: number; y: number; z: number }[] {
-  const out: { x: number; y: number; z: number }[] = [];
-  for (const p of stadium(TABLE_R + 0.03, 96)) out.push({ x: p.x, y: 0, z: p.z });
+/**
+ * Points that must be on screen: the table, and every place an opponent can
+ * sit. People are flat, upright sprites standing on the rail, so for them `up`
+ * and `half` (world units, scaled like the sprite) give the top of the head
+ * and the shoulders' width.
+ */
+function fitPoints(): { x: number; y: number; z: number; up: number; half: number }[] {
+  const out: { x: number; y: number; z: number; up: number; half: number }[] = [];
+  for (const p of stadium(TABLE_R + 0.03, 96)) out.push({ x: p.x, y: 0, z: p.z, up: 0, half: 0 });
   const [from, to] = opponentArc();
+  const inset = SEAT_GAP + RAIL_W / 2;
   for (let i = 0; i <= 40; i++) {
     const p = stadiumAt(TABLE_R + SEAT_GAP, from + ((to - from) * i) / 40);
-    out.push({ x: p.x, y: HEAD_H, z: p.z }, { x: p.x, y: 0, z: p.z });
+    out.push({ x: p.x - p.nx * inset, y: RAIL_H, z: p.z - p.nz * inset, up: (PERSON_H * 54) / 48, half: PERSON_H * 0.5 });
   }
   return out;
 }
@@ -140,9 +145,9 @@ export function fitCamera(w: number, h: number, margin: { top: number; side: num
     let maxY = -Infinity;
     for (const p of FIT) {
       const q = project(unit, p.x, p.y, p.z);
-      minX = Math.min(minX, q.x);
-      maxX = Math.max(maxX, q.x);
-      minY = Math.min(minY, q.y);
+      minX = Math.min(minX, q.x - p.half * q.s);
+      maxX = Math.max(maxX, q.x + p.half * q.s);
+      minY = Math.min(minY, q.y - p.up * q.s);
       maxY = Math.max(maxY, q.y);
     }
     const f = Math.max(1, Math.min((w - 2 * margin.side) / (maxX - minX), (h - margin.top - margin.bottom) / (maxY - minY)));

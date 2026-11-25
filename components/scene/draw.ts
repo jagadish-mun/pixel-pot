@@ -5,14 +5,15 @@
  */
 import { denom, chipTowers } from '@/lib/chips';
 import type { Card } from '@/lib/cards';
-import { BOARD_Z, BET_INSET, CARDS_INSET, POT_SPOT, STACK_INSET, onFelt, spots, type SeatSpot } from './layout';
-import { BODY_H, HEAD_H, RAIL_H, RAIL_W, TABLE_R, project, stadium, type Camera, type Vec } from './project';
+import { BONE, GLYPHS, INK, SMALL_SUITS, SUITS, offscreen, stamp } from './glyphs';
+import { handsSize, handsSprite, type HandsMode } from './hands';
+import { BOARD_Z, BET_INSET, POT_SPOT, STACK_INSET, onFelt, railPoint, spots, type SeatSpot } from './layout';
+import { personSprite, spriteSize, type Pose } from './people';
+import { PERSON_H, RAIL_H, RAIL_W, TABLE_R, project, stadium, type Camera, type Vec } from './project';
 
 type Ctx = CanvasRenderingContext2D;
 type Pt = { x: number; y: number };
 
-const INK = '#0c0916';
-const BONE = '#f4ead5';
 const GOLD = '#f5b83d';
 
 /* --------------------------------- raster --------------------------------- */
@@ -113,45 +114,6 @@ function feltPattern(ctx: Ctx): CanvasPattern | string {
   return p;
 }
 
-// 3×5 rank glyphs and 7×7 suit pips.
-const GLYPHS: Record<string, string[]> = {
-  A: ['.X.', 'X.X', 'XXX', 'X.X', 'X.X'],
-  K: ['X.X', 'XX.', 'X..', 'XX.', 'X.X'],
-  Q: ['.X.', 'X.X', 'X.X', 'XX.', '.XX'],
-  J: ['..X', '..X', '..X', 'X.X', '.X.'],
-  '0': ['XXX', 'X.X', 'X.X', 'X.X', 'XXX'],
-  '1': ['.X.', 'XX.', '.X.', '.X.', 'XXX'],
-  '2': ['XX.', '..X', '.X.', 'X..', 'XXX'],
-  '3': ['XX.', '..X', '.X.', '..X', 'XX.'],
-  '4': ['X.X', 'X.X', 'XXX', '..X', '..X'],
-  '5': ['XXX', 'X..', 'XX.', '..X', 'XX.'],
-  '6': ['.XX', 'X..', 'XXX', 'X.X', 'XXX'],
-  '7': ['XXX', '..X', '.X.', '.X.', '.X.'],
-  '8': ['XXX', 'X.X', 'XXX', 'X.X', 'XXX'],
-  '9': ['XXX', 'X.X', 'XXX', '..X', 'XX.'],
-};
-const SUITS: Record<string, string[]> = {
-  h: ['.XX.XX.', 'XXXXXXX', 'XXXXXXX', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'],
-  d: ['...X...', '..XXX..', '.XXXXX.', 'XXXXXXX', '.XXXXX.', '..XXX..', '...X...'],
-  s: ['...X...', '..XXX..', '.XXXXX.', 'XXXXXXX', 'XXXXXXX', '...X...', '..XXX..'],
-  c: ['..XXX..', '..XXX..', 'XX.X.XX', 'XXXXXXX', 'XX.X.XX', '...X...', '..XXX..'],
-};
-
-const SMALL_SUITS: Record<string, string[]> = {
-  h: ['.X.X.', 'XXXXX', 'XXXXX', '.XXX.', '..X..'],
-  d: ['..X..', '.XXX.', 'XXXXX', '.XXX.', '..X..'],
-  s: ['..X..', '.XXX.', 'XXXXX', 'XXXXX', '.XXX.'],
-  c: ['.XXX.', '.XXX.', 'XXXXX', 'XX.XX', '.XXX.'],
-};
-
-/** Draw a pixel bitmap with its top-left at (x, y), one canvas pixel per cell. */
-function stamp(ctx: Ctx, rows: string[], x: number, y: number, color: string) {
-  ctx.fillStyle = color;
-  x = Math.round(x);
-  y = Math.round(y);
-  rows.forEach((row, dy) => [...row].forEach((c, dx) => c === 'X' && ctx.fillRect(x + dx, y + dy, 1, 1)));
-}
-
 const backs = new WeakMap<Ctx, CanvasPattern>();
 
 /** The red lattice on card backs. */
@@ -176,7 +138,6 @@ function backPattern(ctx: Ctx): CanvasPattern | string {
 /* ---------------------------------- cards --------------------------------- */
 
 export const BOARD_CARD = { w: 0.12, d: 0.17, gap: 0.016 };
-const SMALL_CARD = { w: 0.075, d: 0.105 };
 
 /**
  * A card lying flat at (x, y, z), `w` across and `d` deep: a trapezoid in
@@ -320,7 +281,27 @@ function drawChips(ctx: Ctx, cam: Camera, amount: number, at: Vec) {
     return { t, x: at.x + (col - (inRow - 1) / 2) * step, z: at.z + ((rows - 1) / 2 - row) * step * 0.9 };
   });
   placed.sort((a, b) => b.z - a.z);
-  for (const p of placed) drawTower(ctx, { ...chipShape(cam, p.x, p.z), count: p.t.count, value: p.t.value });
+  for (const p of placed) {
+    const shape = chipShape(cam, p.x, p.z);
+    const img = towerImage(p.t.value, p.t.count, shape.rx, shape.ry, shape.th);
+    if (img) ctx.drawImage(img.canvas, Math.round(shape.x) - img.ox, Math.round(shape.y) - img.oy);
+    else drawTower(ctx, { ...shape, count: p.t.count, value: p.t.value });
+  }
+}
+
+/** Each tower (colour, height, size) is drawn once into a small canvas and reused. */
+const towers = new Map<string, { canvas: HTMLCanvasElement; ox: number; oy: number } | null>();
+function towerImage(value: number, count: number, rx: number, ry: number, th: number) {
+  const key = `${value}|${count}|${rx}|${ry}|${th}`;
+  if (!towers.has(key)) {
+    if (towers.size > 800) towers.clear();
+    const ox = rx + 3;
+    const h = count * th + 2 * ry + 6;
+    const canvas = offscreen(2 * rx + 6, h);
+    if (canvas) drawTower(canvas.getContext('2d')!, { x: ox, y: h - ry - 3, rx, ry, th, count, value });
+    towers.set(key, canvas ? { canvas, ox, oy: h - ry - 3 } : null);
+  }
+  return towers.get(key)!;
 }
 
 /** Where a pile of chips is drawn on screen: its base and how tall it gets, for placing its label. */
@@ -331,30 +312,6 @@ export function chipsExtent(cam: Camera, amount: number, at: Vec): { x: number; 
   const tallest = Math.max(1, ...towers.map((t) => t.count));
   const halfW = (cols * CHIP_R * 2.3 * project(cam, at.x, 0, at.z).s) / 2;
   return { x: shape.x, top: shape.y - tallest * shape.th - shape.ry, bottom: shape.y + shape.ry + 1, right: shape.x + halfW };
-}
-
-/* --------------------------------- people --------------------------------- */
-
-/** A placeholder opponent: a body and a head standing behind the rail. */
-function drawPerson(ctx: Ctx, cam: Camera, seat: SeatSpot, color: string, dim: boolean) {
-  const base = project(cam, seat.x, 0, seat.z);
-  const s = base.s;
-  const bodyTop = project(cam, seat.x, BODY_H, seat.z).y;
-  const headTop = project(cam, seat.x, HEAD_H, seat.z).y;
-  const bw = Math.round(0.2 * s);
-  const hw = Math.round(0.1 * s);
-  ctx.globalAlpha = dim ? 0.45 : 1;
-  const bx = Math.round(base.x - bw / 2);
-  const hx = Math.round(base.x - hw / 2);
-  ctx.fillStyle = INK;
-  ctx.fillRect(bx - 1, Math.round(bodyTop) - 1, bw + 2, Math.round(base.y - bodyTop) + 1);
-  ctx.fillRect(hx - 1, Math.round(headTop) - 1, hw + 2, Math.round(bodyTop - headTop) + 1);
-  ctx.fillStyle = '#2b2440';
-  ctx.fillRect(bx, Math.round(bodyTop), bw, Math.round(base.y - bodyTop));
-  ctx.fillStyle = color;
-  ctx.fillRect(bx + 1, Math.round(bodyTop) + 1, bw - 2, Math.max(1, Math.round((base.y - bodyTop) * 0.35)));
-  ctx.fillRect(hx, Math.round(headTop), hw, Math.round(bodyTop - headTop) - 1);
-  ctx.globalAlpha = 1;
 }
 
 /* ---------------------------------- table --------------------------------- */
@@ -378,16 +335,40 @@ function drawTable(ctx: Ctx, cam: Camera) {
   ctx.globalAlpha = 1;
 }
 
+/** The table never changes for a camera, so it is drawn once per size and reused. */
+const tables = new WeakMap<Camera, HTMLCanvasElement | null>();
+function tableImage(cam: Camera): HTMLCanvasElement | null {
+  if (!tables.has(cam)) {
+    const c = offscreen(cam.w, cam.h);
+    if (c) drawTable(c.getContext('2d')!, cam);
+    tables.set(cam, c);
+  }
+  return tables.get(cam)!;
+}
+
+/* --------------------------------- people --------------------------------- */
+
+/** Where an opponent's person stands on screen: bottom centre on the rail, and their height in pixels. */
+export function personAt(cam: Camera, seat: SeatSpot): { x: number; y: number; height: number } {
+  const r = railPoint(seat);
+  const p = project(cam, r.x, RAIL_H, r.z);
+  return { x: p.x, y: p.y, height: Math.max(16, Math.min(72, Math.round((PERSON_H * p.s * 54) / 48))) };
+}
+
 /* ---------------------------------- scene --------------------------------- */
 
 export interface SceneSeat {
+  id: string;
   seat: SeatSpot;
   me: boolean;
-  color: string;
-  /** Folded, out of the hand, or out of chips. */
-  dim: boolean;
-  /** Face-down cards in front of them (0 for none). */
-  cards: number;
+  /** Face seed (id + name) and whether it's a computer player's robot face. */
+  seed: string;
+  robot: boolean;
+  pose: Pose;
+  /** Cards in their hands (2, or 4 for Omaha) while they hold them. */
+  held: number;
+  /** Cards turned face up on the felt at showdown. */
+  shown: Card[] | null;
   stack: number;
   bet: number;
   acting: boolean;
@@ -401,6 +382,10 @@ export interface SceneData {
   pot: number;
   /** Where new board cards are dealt from. */
   dealerSeat: SeatSpot | null;
+  /** My hands: what they're doing, the cards in them, and the card width. Null for spectators. */
+  hands: { mode: HandsMode; cards: Card[]; count: number; cw: number } | null;
+  /** Where my chips sit (the felt between my hands and the middle). */
+  myZ: number;
 }
 
 export interface Motion {
@@ -408,28 +393,54 @@ export interface Motion {
   dealt: Map<number, number>;
   /** Bets sliding into the pot. */
   sweeps: { from: Vec; amount: number; start: number }[];
+  /** Folded cards flying into the middle, from a point on screen. */
+  folds: { from: Pt; count: number; start: number; size: number }[];
+  /** Player id → when they turned their cards face up. */
+  shown: Map<string, number>;
 }
 
 export const DEAL_MS = 650;
 export const SWEEP_MS = 450;
+export const FOLD_MS = 500;
+export const FLIP_MS = 450;
 
 const ease = (t: number) => 1 - (1 - t) ** 2;
 
-export function drawScene(ctx: Ctx, cam: Camera, data: SceneData, motion: Motion, now: number) {
+/** A small card back flying from `from` toward the middle, shrinking as it goes. */
+function drawFlyingBack(ctx: Ctx, from: Pt, to: Pt, t: number, size: number, k: number) {
+  const e = ease(t);
+  const w = Math.max(2, Math.round(size * (1 - 0.6 * e)));
+  const h = Math.max(3, Math.round(w * 1.4));
+  const x = Math.round(from.x + (to.x - from.x) * e + k * w * 0.4 - w / 2);
+  const y = Math.round(from.y + (to.y - from.y) * e - Math.sin(e * Math.PI) * size * 0.8 - h / 2);
+  ctx.globalAlpha = 1 - e * 0.7;
+  ctx.fillStyle = INK;
+  ctx.fillRect(x - 1, y - 1, w + 2, h + 2);
+  ctx.fillStyle = BONE;
+  ctx.fillRect(x, y, w, h);
+  ctx.fillStyle = '#e2483d';
+  if (w > 3) ctx.fillRect(x + 1, y + 1, w - 2, h - 2);
+  ctx.globalAlpha = 1;
+}
+
+/** Screen rectangle of my hands (internal pixels), bottom centre of the canvas. */
+export function handsBox(cam: Camera, hands: NonNullable<SceneData['hands']>): { x: number; y: number; w: number; h: number } {
+  const { w, h } = handsSize(hands.cw, hands.count);
+  return { x: Math.round(cam.w / 2 - w / 2), y: cam.h - h, w, h };
+}
+
+export function drawScene(ctx: Ctx, cam: Camera, data: SceneData, motion: Motion, now: number, idleOf: (seed: string) => { bob: number; blink: boolean; tilt: boolean }) {
   ctx.imageSmoothingEnabled = false;
-  // The room is the page behind the canvas.
+  // The room is the page behind the canvas; the table is a saved picture.
   ctx.clearRect(0, 0, cam.w, cam.h);
-
-  // People behind the table, far ones first.
-  const others = data.seats.filter((s) => !s.me).sort((a, b) => b.seat.z - a.seat.z);
-  for (const s of others) drawPerson(ctx, cam, s.seat, s.color, s.dim);
-
-  drawTable(ctx, cam);
+  const table = tableImage(cam);
+  if (table) ctx.drawImage(table, 0, 0);
+  else drawTable(ctx, cam);
 
   // Whose turn: a pulsing gold ring on the felt in front of them.
   const acting = data.seats.find((s) => s.acting);
   if (acting) {
-    const c = onFelt(acting.seat, acting.me ? 0.2 : (STACK_INSET + BET_INSET) / 2);
+    const c = acting.me ? { x: 0, z: data.myZ + 0.07 } : onFelt(acting.seat, (STACK_INSET + BET_INSET) / 2);
     const ring: Vec[] = Array.from({ length: 40 }, (_, i) => {
       const a = (i / 40) * Math.PI * 2;
       return { x: c.x + Math.cos(a) * 0.17, z: c.z + Math.sin(a) * 0.13 };
@@ -439,9 +450,9 @@ export function drawScene(ctx: Ctx, cam: Camera, data: SceneData, motion: Motion
     ctx.globalAlpha = 1;
   }
 
-  // Things on the felt, back to front.
+  // Everything on or behind the table, back to front.
   const items: { z: number; draw: () => void }[] = [];
-  const dealing: (() => void)[] = [];
+  const onTop: (() => void)[] = [];
   data.board.forEach((card, i) => {
     const x = boardSlotX(i);
     const started = motion.dealt.get(i);
@@ -452,28 +463,44 @@ export function drawScene(ctx: Ctx, cam: Camera, data: SceneData, motion: Motion
     }
     if (t < 1 && data.dealerSeat) {
       // Slides in from the dealer for the first 60%, then flips over.
-      const from = onFelt(data.dealerSeat, CARDS_INSET);
+      const from = onFelt(data.dealerSeat, 0.05);
       const slide = ease(Math.min(1, t / 0.6));
       const at = { x: from.x + (x - from.x) * slide, y: 0.06 * Math.sin(slide * Math.PI), z: from.z + (BOARD_Z - from.z) * slide };
       const turn = card === 'back' ? 0 : Math.max(0, (t - 0.6) / 0.4);
       items.push({ z: BOARD_Z, draw: () => drawSlot(ctx, cam, x, BOARD_Z) });
-      dealing.push(() => drawFlatCard(ctx, cam, card === 'back' ? 'back' : card, at, BOARD_CARD, { turn }));
+      onTop.push(() => drawFlatCard(ctx, cam, card === 'back' ? 'back' : card, at, BOARD_CARD, { turn }));
       return;
     }
     const win = card !== 'back' && data.winning.has(card);
     items.push({ z: BOARD_Z, draw: () => drawFlatCard(ctx, cam, card, { x, y: 0, z: BOARD_Z }, BOARD_CARD, { outline: win ? GOLD : undefined }) });
   });
+
   for (const s of data.seats) {
-    if (s.cards && !s.me) {
-      const at = spots(s.seat, false).cards;
-      for (let k = 0; k < s.cards; k++) {
-        const x = at.x + (k - (s.cards - 1) / 2) * SMALL_CARD.w * 0.7;
-        items.push({ z: at.z + 0.001 * k, draw: () => drawFlatCard(ctx, cam, 'back', { x, y: 0.002 * k, z: at.z }, SMALL_CARD) });
-      }
-    }
-    const { stack: stackAt, bet: betAt } = spots(s.seat, s.me);
+    const { stack: stackAt, bet: betAt, cards: cardsAt } = spots(s.seat, s.me, data.myZ);
     if (s.stack > 0) items.push({ z: stackAt.z, draw: () => drawChips(ctx, cam, s.stack, stackAt) });
     if (s.bet > 0) items.push({ z: betAt.z, draw: () => drawChips(ctx, cam, s.bet, betAt) });
+    if (s.me) continue;
+    // The person, behind the rail.
+    const at = personAt(cam, s.seat);
+    const look = idleOf(s.seed);
+    const sprite = personSprite({ seed: s.seed, robot: s.robot, pose: s.pose, cards: s.held, blink: look.blink, tilt: look.tilt, height: at.height });
+    if (sprite) {
+      const { w } = spriteSize(at.height);
+      const bob = s.pose === 'out' ? 0 : look.bob;
+      items.push({ z: railPoint(s.seat).z + 0.001, draw: () => ctx.drawImage(sprite, Math.round(at.x - w / 2), Math.round(at.y - at.height + bob)) });
+    }
+    // Shown cards, face up on the felt in front of them, turning over.
+    if (s.shown) {
+      const started = motion.shown.get(s.id);
+      const turn = started === undefined ? 1 : Math.min(1, Math.max(0, (now - started) / FLIP_MS));
+      const n = s.shown.length;
+      const w = n > 2 ? SHOWN_CARD.w * 0.8 : SHOWN_CARD.w;
+      s.shown.forEach((card, k) => {
+        const x = cardsAt.x + (k - (n - 1) / 2) * (w + 0.008);
+        const win = data.winning.has(card);
+        items.push({ z: cardsAt.z, draw: () => drawFlatCard(ctx, cam, card, { x, y: 0, z: cardsAt.z }, { w, d: SHOWN_CARD.d }, { turn, outline: win && turn >= 1 ? GOLD : undefined }) });
+      });
+    }
   }
   if (data.pot > 0) items.push({ z: POT_SPOT.z, draw: () => drawChips(ctx, cam, data.pot, POT_SPOT) });
   for (const sw of motion.sweeps) {
@@ -483,17 +510,37 @@ export function drawScene(ctx: Ctx, cam: Camera, data: SceneData, motion: Motion
   }
   items.sort((a, b) => b.z - a.z);
   for (const it of items) it.draw();
-  for (const d of dealing) d();
+  for (const d of onTop) d();
+
+  // Folded cards flying into the middle.
+  const middle = project(cam, 0, 0, BOARD_Z);
+  for (const f of motion.folds) {
+    const t = (now - f.start) / FOLD_MS;
+    if (t < 0 || t >= 1) continue;
+    for (let k = 0; k < f.count; k++) drawFlyingBack(ctx, f.from, middle, Math.min(1, t + k * 0.05), f.size, k - (f.count - 1) / 2);
+  }
+
+  // My hands, nearest of all.
+  if (data.hands) {
+    const box = handsBox(cam, data.hands);
+    const sprite = handsSprite(data.hands);
+    if (sprite) ctx.drawImage(sprite, box.x, box.y);
+  }
 }
+
+/** Shown cards at showdown: a little smaller than the board's. */
+const SHOWN_CARD = { w: 0.1, d: 0.14 };
 
 /* ------------------------------- labels' anchors ------------------------------ */
 
-/** Screen spots (internal pixels) for a seat's DOM labels. */
-export function seatAnchors(cam: Camera, s: { seat: SeatSpot; me: boolean; stack: number; bet: number }) {
-  const head = project(cam, s.seat.x, HEAD_H, s.seat.z);
-  const { stack: stackAt, bet: betAt } = spots(s.seat, s.me);
+/** Screen spots (internal pixels) for a seat's DOM labels: above the head, and beside the stack and bet. */
+export function seatAnchors(cam: Camera, s: { seat: SeatSpot; me: boolean; stack: number; bet: number }, myZ: number) {
+  const { stack: stackAt, bet: betAt } = spots(s.seat, s.me, myZ);
+  const person = personAt(cam, s.seat);
   return {
-    head: { x: head.x, y: head.y },
+    head: { x: person.x, y: person.y - person.height + Math.round((person.height * 4) / 54) },
+    chest: { x: person.x, y: person.y - person.height * 0.4 },
+    size: person.height,
     stack: chipsExtent(cam, s.stack, stackAt),
     bet: chipsExtent(cam, s.bet, betAt),
   };

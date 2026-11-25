@@ -890,6 +890,176 @@ select.input {
   }
 }
 
+.myHand {
+  display: none;
+}
+
+/* The game and the last three moves, top left, one line each. */
+.hud {
+  position: absolute;
+  top: var(--banner-room);
+  left: 10px;
+  z-index: 6;
+  display: grid;
+  gap: 4px;
+  width: min(calc(100% - 20px), 420px);
+  pointer-events: none;
+  text-shadow:
+    1px 1px 0 var(--ink),
+    -1px -1px 0 var(--ink),
+    1px -1px 0 var(--ink),
+    -1px 1px 0 var(--ink);
+}
+
+/* ---------- the felt ---------- */
+
+.feltHead {
+  overflow: hidden;
+  font-family: var(--display);
+  font-size: 9px;
+  line-height: 1.6;
+  color: var(--dim);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.feltHead > span + span::before {
+  content: '·';
+  padding: 0 8px;
+}
+
+
+.feltGame > span + span::before {
+  content: '·';
+  padding: 0 8px;
+}
+
+.potLabel {
+  font-size: 18px;
+  color: #dff5e9;
+}
+
+.lobby {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 20px 12px 24px;
+  text-align: center;
+}
+
+.lobbyCode {
+  font-family: var(--display);
+  font-size: clamp(32px, 11vw, 48px);
+  letter-spacing: 0.25em;
+  margin-right: -0.25em;
+  color: var(--gold);
+  text-shadow: 4px 4px 0 var(--ink);
+}
+
+.tag {
+  flex: none;
+  padding: 2px 4px;
+  background: var(--bone);
+  color: var(--ink);
+  font-family: var(--display);
+  font-size: 8px;
+  line-height: 1.5;
+}
+
+.tag.dealer {
+  background: var(--gold);
+}
+
+.tag.blind {
+  background: #cfc4ea;
+}
+
+.tag.allin {
+  background: var(--red);
+  color: #fff4ee;
+}
+
+.tag.folded {
+  background: #4a4163;
+  color: var(--bone);
+}
+
+.tag.move {
+  background: #dff5e9;
+}
+
+/* Computer players: a small badge, and dots while they "think". */
+.tag.botTag {
+  margin-right: 3px;
+  background: #4cc9c0;
+  vertical-align: 2px;
+}
+
+.tag.thinking {
+  background: var(--gold);
+}
+
+.tag.thinking i {
+  font-style: normal;
+  animation: thinkDot 1.2s steps(1) infinite;
+}
+
+.tag.thinking i:nth-child(2) {
+  animation-delay: 0.3s;
+}
+
+.tag.thinking i:nth-child(3) {
+  animation-delay: 0.6s;
+}
+
+@keyframes thinkDot {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+/* ---------- table view: an oval felt with seats around it ---------- */
+
+.turnBanner {
+  /* A slim overlay in the space kept for it at the top of the stage. */
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  z-index: 6;
+  max-width: calc(100% - 16px);
+  margin: 0;
+  padding: 6px 12px;
+  transform: translateX(-50%);
+  overflow: hidden;
+  background: var(--panel);
+  color: var(--bone);
+  font-family: var(--display);
+  font-size: 10px;
+  line-height: 1.6;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  box-shadow: 0 0 0 var(--px) var(--ink);
+}
+
+.turnBanner[data-mine='true'] {
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 13px;
+  text-transform: uppercase;
+  text-shadow: 1px 1px 0 rgba(255, 255, 255, 0.45);
+  animation: bannerIn 0.3s steps(3);
+}
+
+@keyframes bannerIn {
+  from {
+    transform: scale(1.12);
+  }
+}
+
 .cardSlot {
   position: relative;
   display: inline-grid;
@@ -1244,15 +1414,34 @@ select.input {
   font-size: 10px;
 }
 
-/* My own cards, big, standing at the near rail. */
-.myCards {
+/* "You have: …", just above my hands. */
+.handsLabel {
   position: absolute;
   z-index: 3;
-  display: grid;
-  justify-items: center;
-  gap: 4px;
-  margin-top: -4px;
+  margin: 0;
+  padding: 0 4px;
   transform: translate(-50%, -100%);
+  white-space: nowrap;
+  text-shadow: 2px 2px 0 var(--ink);
+}
+
+/* Over my hands: press and hold to lower the cards. */
+.peekArea {
+  position: absolute;
+  z-index: 2;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.peekArea:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
 }
 
 .plate .myHand {
@@ -1912,4 +2101,17 @@ select.input {
 .devScene .scene {
   position: relative;
   height: 420px;
+}
+
+.devStats {
+  position: fixed;
+  right: 6px;
+  bottom: 6px;
+  z-index: 50;
+  margin: 0;
+  padding: 2px 6px;
+  background: rgba(12, 9, 22, 0.8);
+  font-size: 11px;
+  color: var(--mint);
+  pointer-events: none;
 }

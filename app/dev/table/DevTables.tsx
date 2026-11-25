@@ -233,6 +233,23 @@ function scenes(): Scene[] {
   applyAction(stacksThem, 'Mia', { type: 'start_hand' }, Date.now(), deck(4));
   out.push(cardScene('Cards · stacks of 15 (me), 250,000 and 2,725', stacksThem, 'Mia'));
 
+  // Someone out of chips: Jo has nothing left, so sits out the hand, greyed.
+  const broke = table(5, { mode: 'cards' });
+  applyAction(broke, 'Mia', { type: 'chips', playerId: 'Jo', amount: -1000 }, Date.now());
+  applyAction(broke, 'Mia', { type: 'start_hand' }, Date.now(), deck(11));
+  applyAction(broke, broke.party.toActId!, { type: 'fold' }, Date.now());
+  out.push(cardScene('Cards · Jo out of chips, one player folded', broke, 'Mia'));
+
+  // Showdown with three opponents turning their cards over.
+  const three = table(4, { mode: 'cards' });
+  applyAction(three, 'Mia', { type: 'start_hand' }, Date.now(), deck(21));
+  callTo(three, 'river');
+  for (let guard = 0; three.party.phase === 'live' && guard < 20; guard++) {
+    const id = three.party.toActId!;
+    applyAction(three, id, legalActions(three.party, id).check ? { type: 'check' } : { type: 'call' }, Date.now());
+  }
+  out.push(cardScene('Cards · showdown, three opponents showing', three, 'Mia'));
+
   // My turn with my cards showing, at the smallest and biggest tables.
   for (const count of [2, 10]) {
     const rec = table(count, { mode: 'cards', actionTimer: 30 });
@@ -245,11 +262,36 @@ function scenes(): Scene[] {
 
 const noop = async () => false;
 
+/** Frame times from the table scene, shown in a corner and logged once a second. */
+function FrameStats() {
+  const [text, setText] = useState('');
+  useEffect(() => {
+    const w = window as { __sceneStats?: number[] };
+    w.__sceneStats = [];
+    const t = setInterval(() => {
+      const times = w.__sceneStats ?? [];
+      if (!times.length) return;
+      const avg = times.reduce((a, b) => a + b, 0) / times.length;
+      const line = `frame ${avg.toFixed(2)} ms avg, ${Math.max(...times).toFixed(2)} ms max (${times.length} frames)`;
+      console.log(`[scene] ${line}`);
+      setText(line);
+      w.__sceneStats = [];
+    }, 1000);
+    return () => {
+      clearInterval(t);
+      delete w.__sceneStats;
+    };
+  }, []);
+  return text ? <p className="devStats">{text}</p> : null;
+}
+
 /** One scene on the real table screen (top bar, overlays, dock), as a player would see it. */
 function FullScreen({ scene, panel }: { scene: Scene; panel: 'chips' | 'log' | null }) {
   const { party } = scene;
   const me = party.players.find((p) => p.id === scene.meId) ?? null;
   return (
+    <>
+    <FrameStats />
     <RoomScreen
       party={party}
       me={me}
@@ -270,6 +312,7 @@ function FullScreen({ scene, panel }: { scene: Scene; panel: 'chips' | 'log' | n
         )
       }
     />
+    </>
   );
 }
 

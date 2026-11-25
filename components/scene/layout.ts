@@ -35,15 +35,23 @@ export const CARDS_INSET = 0.05;
 export const STACK_INSET = 0.17;
 export const BET_INSET = 0.31;
 
-/** Where a seat's chips, face-down cards and bet sit on the felt. Mine: the stack by the rail, the bet a little to my left. */
-export function spots(seat: SeatSpot, me: boolean): { cards: Vec; stack: Vec; bet: Vec } {
-  if (me) return { cards: onFelt(seat, CARDS_INSET), stack: { x: 0.02, z: onFelt(seat, 0.12).z }, bet: { x: -0.12, z: onFelt(seat, BET_INSET).z } };
-  return { cards: onFelt(seat, CARDS_INSET), stack: onFelt(seat, STACK_INSET), bet: onFelt(seat, BET_INSET) };
+/**
+ * Where a seat's chips, cards and bet sit on the felt. Mine sit on the line
+ * between my hands and the middle, at `myZ`, with the bet a little further in.
+ */
+export function spots(seat: SeatSpot, me: boolean, myZ = -0.42): { cards: Vec; stack: Vec; bet: Vec } {
+  if (me) return { cards: onFelt(seat, CARDS_INSET), stack: { x: 0, z: myZ }, bet: { x: 0, z: myZ + 0.15 } };
+  return { cards: onFelt(seat, CARDS_INSET + 0.03), stack: onFelt(seat, STACK_INSET), bet: onFelt(seat, BET_INSET) };
 }
 
-/** The board lies across the middle; the pot sits just in front of it. */
+/** The top of the rail in front of a seat, where an opponent rests their arms. */
+export function railPoint(seat: SeatSpot): Vec {
+  return onFelt(seat, -RAIL_W / 2);
+}
+
+/** The board lies across the middle; the pot sits beside it, on my right. */
 export const BOARD_Z = 0.1;
-export const POT_SPOT: Vec = { x: 0, z: -0.11 };
+export const POT_SPOT: Vec = { x: 0.5, z: BOARD_Z };
 
 /**
  * Seats for a table seen from `meIndex`'s chair: the players rotated so I come
