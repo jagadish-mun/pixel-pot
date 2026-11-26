@@ -8,17 +8,18 @@ import type { Card } from '../../lib/cards';
 import { hashText } from '../../lib/bot';
 import type { Playing, SceneEvent } from './events';
 import {
-  BOARD_CARD,
+  FINE,
+  drawCardAt,
   drawChips,
-  drawFlatCard,
   handsBox,
   personAt,
+  potSpot,
   shownSpots,
   type SceneData,
   type SceneSeat,
 } from './draw';
 import { BONE, INK, LETTERS, offscreen, stamp } from './glyphs';
-import { POT_SPOT, onFelt, spots } from './layout';
+import { onFelt, spots } from './layout';
 import { RAIL_H, project, type Camera, type Vec } from './project';
 
 type Ctx = CanvasRenderingContext2D;
@@ -119,48 +120,49 @@ function handsPoint(s: SceneSeat): Vec & { y: number } {
   return { x: r.x, y: RAIL_H + 0.1, z: r.z };
 }
 
-/** My cards leave from below the bottom of the screen, near the camera. */
-const MY_HANDS = { x: 0, y: 0.32, z: -1.05 };
-
-/** A one-frame dust puff where a card lands. */
-function puff(ctx: Ctx, cam: Camera, at: Vec, t: number) {
-  const p = project(cam, at.x, 0, at.z);
-  const r = Math.max(3, Math.round(0.05 * p.s));
-  ctx.globalAlpha = 0.55 * (1 - t);
-  ctx.fillStyle = BONE;
-  for (let k = 0; k < 8; k++) {
-    const a = (k / 8) * Math.PI * 2;
-    ctx.fillRect(Math.round(p.x + Math.cos(a) * r * (0.8 + t)), Math.round(p.y + Math.sin(a) * r * 0.45 * (0.8 + t)), 1, 1);
+/** A one-frame dust puff round a landed card (fine-layer pixels). */
+function puff(fine: Ctx, cx: number, cy: number, r: number, t: number) {
+  fine.globalAlpha = 0.55 * (1 - t);
+  fine.fillStyle = BONE;
+  for (let k = 0; k < 10; k++) {
+    const a = (k / 10) * Math.PI * 2;
+    fine.fillRect(Math.round((cx + Math.cos(a) * r * (1 + t)) * FINE), Math.round((cy + Math.sin(a) * r * 0.5 * (1 + t)) * FINE), FINE, FINE);
   }
-  ctx.globalAlpha = 1;
+  fine.globalAlpha = 1;
 }
 
-/** Cards in flight from a player's hands to the felt: lift, flip face up in the air, land with a bounce. */
-function drawThrow(ctx: Ctx, cam: Camera, data: SceneData, s: SceneSeat, cards: Card[], t: number) {
+/**
+ * Cards in flight from a player's hands to the felt (fine layer, scene
+ * pixels): lift, flip face up in the air (a plain card while it turns), land
+ * tilted with a bounce and a puff. Mine come up from my hands, bigger at first.
+ */
+function drawThrow(fine: Ctx, cam: Camera, data: SceneData, s: SceneSeat, cards: Card[], t: number) {
+  if (t < 0.3) return; // Still in the hands: drawn by the pose (mine rise with my hands).
   const land = shownSpots(cam, data, s, cards);
-  const from = s.me ? MY_HANDS : handsPoint(s);
-  if (t < 0.3) {
-    // Lifting in the hands (opponents): drawn by the person's pose; mine rise with my hands.
-    return;
+  if (!land.length) return;
+  let from: { x: number; y: number };
+  if (s.me && data.hands) {
+    const box = handsBox(cam, data.hands);
+    from = { x: box.x + box.w / 2, y: box.y + box.h * 0.35 };
+  } else {
+    const hp = handsPoint(s);
+    from = project(cam, hp.x, hp.y, hp.z);
   }
+  const k = land[0].k;
   const u = clamp01((t - 0.3) / 0.5);
   const travel = easeInOut(u);
   const turn = clamp01((t - 0.35) / 0.3);
   const settle = clamp01((t - 0.8) / 0.2);
+  const mid = { x: land.reduce((a, c) => a + c.cx, 0) / land.length, y: land[0].cy };
   for (const c of land) {
-    const at =
-      t < 0.8
-        ? {
-            x: lerp(from.x + (c.at.x - land[0].at.x), c.at.x, travel),
-            y: lerp(from.y, 0, travel) + 0.08 * Math.sin(travel * Math.PI),
-            z: lerp(from.z, c.at.z, travel),
-          }
-        : { ...c.at, y: 0.012 * Math.abs(Math.sin(settle * Math.PI * 1.5)) * (1 - settle) };
-    const size = s.me && t < 0.8 ? { w: lerp(BOARD_CARD.w * 1.6, c.size.w, travel), d: lerp(BOARD_CARD.d * 1.6, c.size.d, travel) } : c.size;
-    // In flight it's a plain flipping card; it lands as the flat sprite, glyphs whole.
-    drawFlatCard(ctx, cam, c.card, at, size, { turn: t < 0.8 ? Math.min(0.99, turn) : 1 });
+    const flying = t < 0.8;
+    const x = flying ? lerp(from.x + (c.cx - mid.x), c.cx, travel) : c.cx;
+    const y = flying ? lerp(from.y, c.cy, travel) - 14 * Math.sin(travel * Math.PI) : c.cy - 2 * Math.abs(Math.sin(settle * Math.PI * 1.5)) * (1 - settle);
+    // Mine start big (close to me) and shrink onto the felt; whole-number scales only.
+    const kk = s.me && flying ? Math.max(k, Math.round(lerp(k * 1.6, k, travel))) : k;
+    drawCardAt(fine, c.card, x, y, kk, { turn: flying ? turn : 1, tilt: c.tilt * travel });
   }
-  if (t >= 0.8 && t < 0.87) for (const c of land) puff(ctx, cam, c.at, (t - 0.8) / 0.07);
+  if (t >= 0.8 && t < 0.87) for (const c of land) puff(fine, c.cx, c.cy, (k * 18) / FINE, (t - 0.8) / 0.07);
 }
 
 /** A pile of chips sliding along a curve, towers leaning into the move and wobbling as they stop. */
@@ -225,9 +227,6 @@ export function overlayFor(ctx: Ctx, cam: Camera, data: SceneData, view: AnimVie
       if (!s) return;
       const sp = spots(s.seat, s.me, data.myZ);
       drawSlide(ctx, cam, Math.min(s.bet, e.amount), s.betChips || 8, sp.stack, sp.bet, p.t);
-    } else if (e.type === 'show') {
-      const s = byId.get(e.id);
-      if (s) drawThrow(ctx, cam, data, s, e.cards, p.t);
     } else if (e.type === 'potToWinner' && p.t >= 0.45) {
       // The pot splits and slides to each winner, by share.
       const total = Math.max(1, e.winners.reduce((sum, w) => sum + w.amount, 0));
@@ -236,9 +235,15 @@ export function overlayFor(ctx: Ctx, cam: Camera, data: SceneData, view: AnimVie
         if (!s) continue;
         const to = spots(s.seat, s.me, data.myZ).stack;
         const chips = Math.max(1, Math.round(((data.potChips || 12) * w.amount) / total));
-        drawSlide(ctx, cam, w.amount, chips, POT_SPOT, to, (p.t - 0.45) / 0.55);
+        drawSlide(ctx, cam, w.amount, chips, potSpot(cam), to, (p.t - 0.45) / 0.55);
       }
     }
+  };
+  // Thrown cards go on the fine layer, with the other cards.
+  const fine = (f: Ctx) => {
+    if (p?.event.type !== 'show') return;
+    const s = byId.get(p.event.id);
+    if (s) drawThrow(f, cam, data, s, p.event.cards, p.t);
   };
   const top = () => {
     const img = badgeImage();
@@ -268,7 +273,7 @@ export function overlayFor(ctx: Ctx, cam: Camera, data: SceneData, view: AnimVie
   // A tiny screen shake right as an all-in lands.
   const sinceAllin = p?.event.type === 'allin' ? now - p.start : Infinity;
   const shake = sinceAllin < SHAKE_MS ? { x: Math.round(Math.sin(sinceAllin / 12) * 2), y: Math.round(Math.cos(sinceAllin / 9) * 1) } : { x: 0, y: 0 };
-  return { felt, top, shake };
+  return { felt, fine, top, shake };
 }
 
 /** A white-noise chip clatter: a few short bursts. */

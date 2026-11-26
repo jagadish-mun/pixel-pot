@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { arrangeSeats, BET_INSET, MY_SEAT, onFelt, seatLayout, STACK_INSET } from '../components/scene/layout';
 import { personAt } from '../components/scene/draw';
-import { poseOf, spriteSize } from '../components/scene/people';
+import { poseOf, spriteMetrics } from '../components/scene/people';
 import { fitCamera, project, TABLE_R } from '../components/scene/project';
 
 const dist = (a: { x: number; z: number }, b: { x: number; z: number }) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -78,7 +78,7 @@ describe('projection', () => {
       // Each opponent's whole figure (a sprite standing on the rail) is inside the margins.
       for (const s of seatLayout(9)) {
         const p = personAt(c, s);
-        const { w: sw } = spriteSize(p.height);
+        const { w: sw } = spriteMetrics(p.height);
         expect(p.x - sw / 2).toBeGreaterThanOrEqual(29);
         expect(p.x + sw / 2).toBeLessThanOrEqual(w - 29);
         expect(p.y - p.height).toBeGreaterThanOrEqual(19);

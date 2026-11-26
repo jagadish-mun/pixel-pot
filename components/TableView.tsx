@@ -2,10 +2,10 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import { BADGE_MS, applyPending, clatter, overlayFor, type AnimView } from './scene/animate';
-import { DEAL_MS, FOLD_MS, SWEEP_MS, drawScene, handsBox, peopleBoxes, personAt, seatAnchors, type Marker, type Motion, type SceneData } from './scene/draw';
+import { DEAL_MS, FOLD_MS, PILES, SWEEP_MS, boardSlots, chipsExtent, drawScene, flatCard, handsBox, peopleBoxes, personAt, potSpot, seatAnchors, type Marker, type Motion, type SceneData } from './scene/draw';
 import { AnimQueue, diffSnapshots } from './scene/events';
 import { handsSize, myCardWidth } from './scene/hands';
-import { BET_INSET, BOARD_Z, POT_SPOT, arrangeSeats, onFelt, spots } from './scene/layout';
+import { BET_INSET, arrangeSeats, onFelt, spots } from './scene/layout';
 import { idle, poseOf } from './scene/people';
 import { fitCamera, project, type Camera } from './scene/project';
 import { WEALTH, wealthTarget } from '@/lib/chips';
@@ -430,6 +430,12 @@ export default function TableView({
     const box = (e: { left: number; right: number; top: number; bottom: number }) => ({ i, left: e.left * q, right: e.right * q, top: e.top * q, bottom: e.bottom * q });
     return [...(p.stack > 0 ? [box(a.stack)] : []), ...(inFront(party, seats[i].player) > 0 ? [box(a.bet)] : [])];
   });
+  // The board's cards count too (i = -1: nobody's own pile).
+  if (cam && cardsMode) {
+    const slots = boardSlots(cam);
+    const { w, h } = flatCard(cam);
+    piles.push({ i: -1, left: (slots[0].cx - w / 2) * q, right: (slots[4].cx + w / 2) * q, top: (slots[0].cy - h / 2) * q, bottom: (slots[0].cy + h / 2) * q });
+  }
   const labelClashes = (i: number, pile: { left: number; right: number; top: number; bottom: number }, text: string, onLeft: boolean, em: number) => {
     const w = text.length * em + 6;
     const mid = ((pile.top + pile.bottom) / 2) * q;
@@ -578,9 +584,11 @@ export default function TableView({
             (playing ? total > 0 : lastHand) && (
               <div
                 className="potLabel3d"
-                // During a hand, just under the pot's chips; between hands (no chips), where the pot sits.
-                data-centred="true"
-                style={playing ? at(project(cam, POT_SPOT.x, 0, POT_SPOT.z - 0.09).x, project(cam, POT_SPOT.x, 0, POT_SPOT.z - 0.09).y) : at(project(cam, POT_SPOT.x - 0.02, 0, BOARD_Z).x, project(cam, 0, 0, BOARD_Z).y)}
+                // Beside the pot's chips, clear of them (between hands, where the pot sits).
+                style={(() => {
+                  const e = chipsExtent(cam, Math.max(1, data.pot), potSpot(cam), data.potChips, PILES.bet);
+                  return at(e.right + 3, (e.top + e.bottom) / 2);
+                })()}
                 aria-live="polite"
               >
                 <b>{chips(playing ? total : lastHand?.kind === 'hand' ? lastHand.pot : 0)}</b>
